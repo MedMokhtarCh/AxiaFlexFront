@@ -251,6 +251,30 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
     return ids;
   }, [activeCategoryId, childCategoryIdsByParentId]);
 
+  const rootCategoryIdForActive = useMemo(() => {
+    if (activeCategoryId === "favorites") return null;
+    let currentId = activeCategoryId;
+    let current = categoriesById.get(currentId);
+    while (current?.parentId) {
+      currentId = String(current.parentId);
+      current = categoriesById.get(currentId);
+    }
+    return currentId;
+  }, [activeCategoryId, categoriesById]);
+
+  const rootCategories = useMemo(
+    () =>
+      categories
+        .filter((c) => !c.parentId)
+        .filter((c) => categoryIdsWithPosProducts.has(c.id)),
+    [categories, categoryIdsWithPosProducts],
+  );
+
+  const activeRootChildren = useMemo(() => {
+    if (!rootCategoryIdForActive) return [];
+    return categories.filter((c) => String(c.parentId || "") === rootCategoryIdForActive);
+  }, [categories, rootCategoryIdForActive]);
+
   const filteredProducts = useMemo(() => {
     if (activeCategoryId === "favorites") {
       return productsForPos.filter((p) => Boolean((p as any).favorite));
@@ -1295,7 +1319,7 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
           </div>
         </div>
 
-        {/* Categories - Sleek Horizontal Nav */}
+        {/* Categories - Level 1: favorites + root categories */}
         <div className="flex gap-2 overflow-x-auto px-2 pb-1 scrollbar-hide shrink-0">
           <button
             onClick={() => setActiveCategoryId("favorites")}
@@ -1303,19 +1327,37 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
           >
             Favoris
           </button>
-          {categories
-            .filter((c) => !c.parentId)
-            .filter((c) => categoryIdsWithPosProducts.has(c.id))
-            .map((cat) => (
+          {rootCategories.map((cat) => (
               <button
                 key={cat.id}
                 onClick={() => setActiveCategoryId(cat.id)}
-                className={`px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all whitespace-nowrap border ${activeCategoryId === cat.id ? "bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100" : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300"}`}
+                className={`px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all whitespace-nowrap border ${rootCategoryIdForActive === cat.id ? "bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100" : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300"}`}
               >
                 {cat.name}
               </button>
             ))}
         </div>
+
+        {/* Categories - Level 2: children of selected root */}
+        {rootCategoryIdForActive && activeRootChildren.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto px-2 pb-1 scrollbar-hide shrink-0">
+            <button
+              onClick={() => setActiveCategoryId(rootCategoryIdForActive)}
+              className={`px-3 py-1.5 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all whitespace-nowrap border ${activeCategoryId === rootCategoryIdForActive ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-500 border-slate-200 hover:border-slate-400"}`}
+            >
+              Tous
+            </button>
+            {activeRootChildren.map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => setActiveCategoryId(cat.id)}
+                className={`px-3 py-1.5 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all whitespace-nowrap border ${activeCategoryId === cat.id ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-500 border-slate-200 hover:border-slate-400"}`}
+              >
+                {cat.name}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Grid: 13-inch optimized columns */}
         <div className="flex-1 overflow-y-auto px-2 scrollbar-hide pb-10">
