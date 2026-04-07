@@ -12,7 +12,7 @@ export class Order {
 
 
   @OneToMany(() => OrderItem, (item: any) => item.order)
-  items!: OrderItem[];
+  items!: any[];
 
   @Column('decimal', { precision: 10, scale: 2, default: 0 })
   total!: number;
@@ -71,5 +71,5 @@ export class Order {
 
 
   @OneToMany(() => Payment, (payment: any) => payment.order)
-  payments!: Payment[];
+  payments!: any[];
 }

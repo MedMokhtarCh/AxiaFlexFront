@@ -7,7 +7,7 @@ export class OrderItem {
   id!: string;
 
   @ManyToOne(() => Order, (order: any) => order.items)
-  order!: Order;
+  order!: any;
 
   @Column('varchar')
   productId!: string;

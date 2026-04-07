@@ -12,14 +12,14 @@ export class Ticket {
   code!: string; // prefixed code (from settings.ticketPrefix)
 
   @ManyToOne(() => Order, (order) => (order as any).id)
-  order!: Order;
+  order!: any;
 
   /** Ticket issu d'un encaissement spécifique (paiement partiel ou complet). */
   @ManyToOne(() => Payment, (payment) => (payment as any).id, { nullable: true })
-  payment?: Payment | null;
+  payment?: any | null;
 
   @OneToMany(() => TicketItem, (item) => (item as any).ticket, { cascade: true })
-  items!: TicketItem[];
+  items!: any[];
 
   @Column('decimal', { precision: 12, scale: 3, default: 0 })
   total!: number;

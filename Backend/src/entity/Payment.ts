@@ -10,7 +10,7 @@ export class Payment {
   code!: string;
 
   @ManyToOne(() => Order, (order: any) => order.id)
-  order!: Order;
+  order!: any;
 
   @Column('decimal', { precision: 12, scale: 3, default: 0 })
   totalPaid!: number;

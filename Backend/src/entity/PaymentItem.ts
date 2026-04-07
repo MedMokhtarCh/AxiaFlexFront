@@ -8,10 +8,10 @@ export class PaymentItem {
   id!: string;
 
   @ManyToOne(() => Payment, (payment: any) => payment.id)
-  payment!: Payment;
+  payment!: any;
 
   @ManyToOne(() => OrderItem, (orderItem: any) => orderItem.id)
-  orderItem!: OrderItem;
+  orderItem!: any;
 
   @Column('int')
   quantityPaid!: number;
