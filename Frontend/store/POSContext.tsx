@@ -99,6 +99,56 @@ const normalizeProductAssets = (p: any): Product => ({
   ...(p as Product),
   imageUrl: toAbsoluteAssetUrl((p as any)?.imageUrl),
 });
+
+async function fileToCompressedDataUrl(file: File): Promise<string | null> {
+  const readAsDataUrl = (f: File) =>
+    new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () =>
+        resolve(typeof reader.result === "string" ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(f);
+    });
+
+  const raw = await readAsDataUrl(file);
+  if (!raw) return null;
+
+  // Skip SVG and keep original payload.
+  if (String(file.type || "").toLowerCase().includes("svg")) return raw;
+
+  const img = await new Promise<HTMLImageElement | null>((resolve) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = () => resolve(null);
+    i.src = raw;
+  });
+  if (!img) return raw;
+
+  const MAX_DIMENSION = 1280;
+  const ratio = Math.min(
+    1,
+    MAX_DIMENSION / Math.max(Number(img.width || 1), Number(img.height || 1)),
+  );
+  const width = Math.max(1, Math.round(img.width * ratio));
+  const height = Math.max(1, Math.round(img.height * ratio));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return raw;
+  ctx.drawImage(img, 0, 0, width, height);
+
+  // Target about <= 900 KB base64 payload for safer API request size.
+  const TARGET_LEN = 900_000;
+  let quality = 0.82;
+  let out = canvas.toDataURL("image/jpeg", quality);
+  while (out.length > TARGET_LEN && quality > 0.45) {
+    quality -= 0.08;
+    out = canvas.toDataURL("image/jpeg", quality);
+  }
+  return out;
+}
 // Default to simulated backend when no API_URL is configured or explicitly set to true
 const USE_SIMULATED_BACKEND =
   String((import.meta as any).env?.VITE_USE_SIMULATED_BACKEND ?? "false")
@@ -4010,16 +4060,9 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
     if (saved) setSettings((prev) => ({ ...prev, ...saved }));
   };
   const uploadProductImage = async (file: File): Promise<string | null> => {
-    // Persist image directly in DB as data URL to survive container redeploys.
-    return await new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") resolve(reader.result);
-        else resolve(null);
-      };
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(file);
-    });
+    // Persist image directly in DB as compressed data URL to survive redeploys
+    // and avoid 413 payload-too-large responses.
+    return await fileToCompressedDataUrl(file);
   };
   const updateOrderStatus = async (id: string, status: OrderStatus) => {
     await requireUserConfirmation("Modifier le statut de la commande");
