@@ -2,6 +2,14 @@ import type { OrderItem, Printer, Product } from "../types";
 import { OrderStatus, Role } from "../types";
 import { isReceiptPrinter, printerBonProfile } from "./printerUtils";
 
+const normalizePosteKey = (value: string): string => {
+  const raw = String(value || "").trim().toUpperCase();
+  if (!raw) return "";
+  if (raw === "CUISINE" || raw === "KITCHEN") return "KITCHEN";
+  if (raw === "BAR") return "BAR";
+  return raw;
+};
+
 /** Poste de préparation d’une ligne (aligné KDS / imprimantes produit). */
 export function resolveItemStation(
   item: Pick<OrderItem, "station" | "productId">,
@@ -69,11 +77,14 @@ export function bonProfileForPosteKey(
   posteKey: string,
   printers: Printer[],
 ): "kitchen" | "bar" {
+  const normalized = normalizePosteKey(posteKey);
   const m = printers.find(
-    (pr) => !isReceiptPrinter(pr) && String(pr.type) === posteKey,
+    (pr) =>
+      !isReceiptPrinter(pr) &&
+      normalizePosteKey(String(pr.type || "")) === normalized,
   );
   if (m) return printerBonProfile(m);
-  if (String(posteKey).trim().toLowerCase() === "bar") return "bar";
+  if (normalized === "BAR") return "bar";
   return "kitchen";
 }
 
@@ -82,7 +93,7 @@ export function listKdsPostes(printers: Printer[]): string[] {
   const s = new Set<string>();
   for (const p of printers) {
     if (isReceiptPrinter(p)) continue;
-    const t = String(p.type || "").trim();
+    const t = normalizePosteKey(String(p.type || "").trim());
     if (t) s.add(t);
   }
   return Array.from(s).sort((a, b) => a.localeCompare(b, "fr"));
@@ -134,11 +145,14 @@ export function itemMatchesKdsFilter(
   productsById: Map<string, Product>,
   printersById: Map<string, Printer>,
 ): boolean {
-  const keys = getItemKdsPosteKeys(item, productsById, printersById);
-  const inScope = keys.filter((k) => rolePostes.includes(k));
+  const keys = getItemKdsPosteKeys(item, productsById, printersById).map(
+    normalizePosteKey,
+  );
+  const role = rolePostes.map(normalizePosteKey);
+  const inScope = keys.filter((k) => role.includes(k));
   if (inScope.length === 0) return false;
-  if (filter === "ALL") return true;
-  return inScope.includes(filter);
+  if (normalizePosteKey(filter) === "ALL") return true;
+  return inScope.includes(normalizePosteKey(filter));
 }
 
 export function canStaffActOnKdsItem(
@@ -150,7 +164,9 @@ export function canStaffActOnKdsItem(
   printersById: Map<string, Printer>,
 ): boolean {
   if (isFullTicketRole) return true;
-  const keys = getItemKdsPosteKeys(item, productsById, printersById);
+  const keys = getItemKdsPosteKeys(item, productsById, printersById).map(
+    normalizePosteKey,
+  );
   if (role === Role.CHEF) {
     return keys.some((k) => bonProfileForPosteKey(k, printers) === "kitchen");
   }
