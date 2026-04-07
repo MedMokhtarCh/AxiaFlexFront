@@ -36,5 +36,6 @@ temp/
 
 ## Backend audit exports/local generated files (if present)
 Backend/audit-logs/
+Backend/data/audit-logs/
 Backend/uploads/
 
