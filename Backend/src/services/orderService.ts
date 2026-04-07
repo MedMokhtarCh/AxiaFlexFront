@@ -697,11 +697,9 @@ export async function addOrderPayment(
   }
   existing.paidAmount = currentPaid + amount;
   if (existing.paidAmount >= total) {
-    existing.status = 'COMPLETED';
     const finalCount = await payRepo.count({ where: { order: { id } } as any });
     existing.paymentMethod = finalCount === 1 ? method : 'SPLIT';
   } else {
-    existing.status = 'PARTIAL';
     existing.paymentMethod = 'SPLIT';
   }
 
@@ -736,7 +734,7 @@ export async function addOrderPayment(
   // Free table when order is fully paid
   let saved: any = fullAfterPay || existing;
 
-  if (String(saved.status || '').toUpperCase() === 'COMPLETED') {
+  if (willBeCompleted) {
     await freeTableForCompletedOrder(saved);
   }
 
