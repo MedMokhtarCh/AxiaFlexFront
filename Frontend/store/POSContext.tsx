@@ -78,11 +78,14 @@ function appendReportTerminalToSearchParams(
 }
 
 // Derive API base URL.
-// For local development, always use same-origin relative URLs and let
-// the Vite dev server proxy /pos and /ws to the backend. This avoids
-// issues when the frontend port changes (e.g. 3000 -> 3001) or when
-// accessing the app via a LAN IP.
-let API_BASE_URL = "";
+// In local dev, keep same-origin to use Vite proxy (/pos, /ws).
+// In production, require VITE_API_URL when backend is hosted elsewhere.
+const RAW_API_URL = String((import.meta as any).env?.VITE_API_URL ?? "").trim();
+const IS_PROD = String((import.meta as any).env?.PROD ?? "false") === "true";
+let API_BASE_URL = RAW_API_URL.replace(/\/+$/, "");
+if (!API_BASE_URL && !IS_PROD) {
+  API_BASE_URL = "";
+}
 // Default to simulated backend when no API_URL is configured or explicitly set to true
 const USE_SIMULATED_BACKEND =
   String((import.meta as any).env?.VITE_USE_SIMULATED_BACKEND ?? "false")
@@ -2382,6 +2385,18 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
           throw new Error(errorMessage);
         }
         setIsOffline(false);
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.includes("application/json")) {
+          const text = await response.text().catch(() => "");
+          if (text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html")) {
+            throw new Error(
+              "Réponse HTML reçue au lieu de JSON. Configurez VITE_API_URL vers l'URL backend (ex: https://api.example.com).",
+            );
+          }
+          throw new Error(
+            `Réponse API non JSON (${response.status}). Vérifiez VITE_API_URL et les routes backend.`,
+          );
+        }
         return await response.json();
       } catch (e) {
         setIsOffline(true);
@@ -4506,6 +4521,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
 
   useEffect(() => {
     if (useSimulatedBackend) return;
+    if (!API_BASE_URL && IS_PROD) return;
     let ws: WebSocket | null = null;
     let retryTimer: number | undefined;
     let shouldReconnect = true;
