@@ -1,0 +1,13 @@
+import { Router } from 'express';
+import * as saasController from '../controllers/saasController.js';
+
+const router = Router();
+
+router.post('/verify', saasController.verifySuperAdmin);
+router.get('/license', saasController.getLicense);
+router.patch('/license', saasController.patchLicense);
+router.post('/license/sync-external', saasController.syncLicenseExternal);
+router.get('/logs', saasController.getDeveloperLogs);
+router.post('/logs', saasController.postDeveloperLog);
+
+export default router;

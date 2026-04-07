@@ -1,0 +1,40 @@
+## Dependencies
+node_modules/
+
+## Build outputs
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+## Environment files
+.env
+.env.*
+!.env.example
+
+## Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+## OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+## Cursor
+.cursor/
+
+## Runtime / temp files
+tmp/
+temp/
+*.tmp
+
+## Backend audit exports/local generated files (if present)
+Backend/audit-logs/
+Backend/uploads/
+
