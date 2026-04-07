@@ -4010,31 +4010,16 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
     if (saved) setSettings((prev) => ({ ...prev, ...saved }));
   };
   const uploadProductImage = async (file: File): Promise<string | null> => {
-    if (useSimulatedBackend) {
-      return await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          if (typeof reader.result === "string") resolve(reader.result);
-          else resolve(null);
-        };
-        reader.readAsDataURL(file);
-      });
-    }
-
-    const formData = new FormData();
-    formData.append("image", file);
-    const resp = await fetch(`${API_BASE_URL}/pos/products/upload-image`, {
-      method: "POST",
-      body: formData,
+    // Persist image directly in DB as data URL to survive container redeploys.
+    return await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") resolve(reader.result);
+        else resolve(null);
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
     });
-    const payload = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      const msg =
-        (payload && typeof payload.error === "string" && payload.error) ||
-        `Upload échoué (${resp.status})`;
-      throw new Error(msg);
-    }
-    return toAbsoluteAssetUrl(payload?.imageUrl) || null;
   };
   const updateOrderStatus = async (id: string, status: OrderStatus) => {
     await requireUserConfirmation("Modifier le statut de la commande");

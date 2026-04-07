@@ -11,7 +11,7 @@ import multer from 'multer';
 export function createApp() {
   const app = express();
   app.use(cors());
-  app.use(express.json());
+  app.use(express.json({ limit: '15mb' }));
 
   app.use((req: any, _res, next) => {
     if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) {
