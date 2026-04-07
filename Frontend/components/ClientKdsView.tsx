@@ -26,7 +26,7 @@ const statusTone = (status: OrderStatus) => {
 const formatOrderReference = (order: Order) => {
   const tn = String(order.ticketNumber || "").trim();
   if (tn) return tn;
-  return `#${order.id.slice(-6)}`;
+  return "Commande";
 };
 
 interface ClientKdsViewProps {
@@ -61,6 +61,16 @@ const ClientKdsView: React.FC<ClientKdsViewProps> = ({
     // Single initial fetch; subsequent updates for shared KDS rely on WebSocket events
     run();
   }, [refreshOrders, tableToken, getClientOrders]);
+
+  useEffect(() => {
+    if (!tableToken) return;
+    const id = window.setInterval(() => {
+      getClientOrders(tableToken)
+        .then((list) => setClientOrders(list || []))
+        .catch(() => undefined);
+    }, 4000);
+    return () => window.clearInterval(id);
+  }, [tableToken, getClientOrders]);
 
   const sourceOrders = tableToken ? clientOrders : orders;
 
