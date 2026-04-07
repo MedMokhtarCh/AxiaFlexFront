@@ -9,8 +9,8 @@ export async function listCategories(req: Request, res: Response) {
 
 export async function createCategory(req: Request, res: Response) {
   try {
-    const { name, parentId } = req.body;
-    const c = await categoryService.createCategory(name, parentId);
+    const { name, parentId, imageUrl } = req.body;
+    const c = await categoryService.createCategory(name, parentId, imageUrl);
     void logAppAdminAction(req, 'insert', 'category', c.id, {
       name: c.name,
       parentId: c.parentId ?? null,
@@ -41,12 +41,13 @@ export async function deleteCategory(req: Request, res: Response) {
 export async function patchCategory(req: Request, res: Response) {
   try {
     const id = req.params.id;
-    const { name, parentId } = req.body ?? {};
+    const { name, parentId, imageUrl } = req.body ?? {};
     const rows = await categoryService.listCategories();
     const before = (rows || []).find((r: any) => String(r.id) === String(id));
     const updates: any = {};
     if (name !== undefined) updates.name = typeof name === 'string' ? name.trim() : name;
     if (parentId !== undefined) updates.parentId = parentId || null;
+    if (imageUrl !== undefined) updates.imageUrl = imageUrl || null;
     const updated = await categoryService.updateCategory(id, updates);
     if (!updated) return res.status(404).json({ error: 'Not found' });
     void logAppAdminAction(req, 'update', 'category', id, {

@@ -16,6 +16,7 @@ import {
 import { notifySuccess, notifyError, notifyInfo } from "../utils/notify";
 import { resolveItemStation } from "../utils/kdsStation";
 import { isReceiptPrinter, printerBonProfile } from "../utils/printerUtils";
+import { resolveAssetUrl } from "../utils/resolveAssetUrl";
 import {
   Trash2,
   Plus,
@@ -97,7 +98,7 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
     printTicket,
     downloadTicketPdf,
   } = usePOS();
-  const [activeCategoryId, setActiveCategoryId] = useState<string>("all");
+  const [activeCategoryId, setActiveCategoryId] = useState<string>("favorites");
   const [cart, setCart] = useState<OrderItem[]>([]);
   const [orderType, setOrderType] = useState<OrderType>(
     initialMode || OrderType.DINE_IN,
@@ -199,19 +200,65 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
     [products],
   );
 
+  const categoriesById = useMemo(() => {
+    const map = new Map<string, (typeof categories)[number]>();
+    for (const c of categories) map.set(String(c.id), c);
+    return map;
+  }, [categories]);
+
+  const childCategoryIdsByParentId = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const c of categories) {
+      const pid = c.parentId ? String(c.parentId) : "";
+      if (!pid) continue;
+      const arr = map.get(pid) || [];
+      arr.push(String(c.id));
+      map.set(pid, arr);
+    }
+    return map;
+  }, [categories]);
+
   const categoryIdsWithPosProducts = useMemo(() => {
     const ids = new Set<string>();
     for (const p of productsForPos) {
-      if (p.category != null && String(p.category).trim() !== "")
-        ids.add(String(p.category));
+      const cid = p.category != null ? String(p.category).trim() : "";
+      if (!cid) continue;
+      ids.add(cid);
+      let current = categoriesById.get(cid);
+      // Also mark ancestors so parent tabs stay visible when products are in sub-categories.
+      while (current?.parentId) {
+        const parentId = String(current.parentId);
+        ids.add(parentId);
+        current = categoriesById.get(parentId);
+      }
     }
     return ids;
-  }, [productsForPos]);
+  }, [productsForPos, categoriesById]);
+
+  const categoryFilterIds = useMemo(() => {
+    if (activeCategoryId === "all") return null;
+    const ids = new Set<string>([activeCategoryId]);
+    const queue = [activeCategoryId];
+    while (queue.length > 0) {
+      const current = queue.shift() as string;
+      const children = childCategoryIdsByParentId.get(current) || [];
+      for (const childId of children) {
+        if (ids.has(childId)) continue;
+        ids.add(childId);
+        queue.push(childId);
+      }
+    }
+    return ids;
+  }, [activeCategoryId, childCategoryIdsByParentId]);
 
   const filteredProducts = useMemo(() => {
-    if (activeCategoryId === "all") return productsForPos;
-    return productsForPos.filter((p) => p.category === activeCategoryId);
-  }, [productsForPos, activeCategoryId]);
+    if (activeCategoryId === "favorites") {
+      return productsForPos.filter((p) => Boolean((p as any).favorite));
+    }
+    return productsForPos.filter((p) =>
+      categoryFilterIds?.has(String(p.category || "")),
+    );
+  }, [productsForPos, activeCategoryId, categoryFilterIds]);
 
   const isVariantOutOfStock = useCallback(
     (variant?: ProductVariant | null) =>
@@ -237,10 +284,10 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
 
   useEffect(() => {
     if (
-      activeCategoryId !== "all" &&
+      activeCategoryId !== "favorites" &&
       !categoryIdsWithPosProducts.has(activeCategoryId)
     ) {
-      setActiveCategoryId("all");
+      setActiveCategoryId("favorites");
     }
   }, [activeCategoryId, categoryIdsWithPosProducts]);
 
@@ -1251,10 +1298,10 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
         {/* Categories - Sleek Horizontal Nav */}
         <div className="flex gap-2 overflow-x-auto px-2 pb-1 scrollbar-hide shrink-0">
           <button
-            onClick={() => setActiveCategoryId("all")}
-            className={`px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all whitespace-nowrap border ${activeCategoryId === "all" ? "bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100" : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300"}`}
+            onClick={() => setActiveCategoryId("favorites")}
+            className={`px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all whitespace-nowrap border ${activeCategoryId === "favorites" ? "bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100" : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300"}`}
           >
-            Tous les Produits
+            Favoris
           </button>
           {categories
             .filter((c) => !c.parentId)
@@ -1295,7 +1342,7 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
               >
                 <div className="aspect-[4/3] rounded-xl overflow-hidden mb-2.5 bg-slate-100 relative">
                   <img
-                    src={product.imageUrl}
+                    src={resolveAssetUrl(product.imageUrl)}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                     alt={product.name}
                   />

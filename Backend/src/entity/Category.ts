@@ -10,4 +10,7 @@ export class Category {
 
   @Column('varchar', { nullable: true })
   parentId?: string | null;
+
+  @Column('varchar', { nullable: true })
+  imageUrl?: string | null;
 }

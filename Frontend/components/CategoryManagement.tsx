@@ -1,12 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { Category } from "../types";
 
 interface CategoryManagementProps {
   categories: Category[];
-  addCategory: (name: string, parentId?: string) => Promise<void>;
+  addCategory: (name: string, parentId?: string, imageUrl?: string) => Promise<void>;
   updateCategory: (id: string, data: any) => Promise<void>;
   deleteCategory: (id: string) => Promise<void>;
+  uploadCategoryImage: (file: File) => Promise<string | null>;
   showToast: (msg: string, kind?: "success" | "error" | "info") => void;
 }
 
@@ -15,23 +16,42 @@ const CategoryManagement: React.FC<CategoryManagementProps> = ({
   addCategory,
   updateCategory,
   deleteCategory,
+  uploadCategoryImage,
   showToast,
 }) => {
   const [showModal, setShowModal] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [name, setName] = useState("");
   const [parentId, setParentId] = useState<string>("");
+  const [imageUrl, setImageUrl] = useState<string>("");
   const [isSaving, setIsSaving] = useState(false);
+  const [page, setPage] = useState(1);
+  const pageSize = 12;
+  const categoriesById = useMemo(() => {
+    const map = new Map<string, Category>();
+    for (const c of categories) map.set(String(c.id), c);
+    return map;
+  }, [categories]);
 
   useEffect(() => {
     if (editingCategory) {
       setName(editingCategory.name || "");
       setParentId(editingCategory.parentId || "");
+      setImageUrl(editingCategory.imageUrl || "");
     } else {
       setName("");
       setParentId("");
+      setImageUrl("");
     }
   }, [editingCategory, showModal]);
+  useEffect(() => {
+    setPage(1);
+  }, [categories.length]);
+  const pagedCategories = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return categories.slice(start, start + pageSize);
+  }, [categories, page]);
+  const totalPages = Math.max(1, Math.ceil(categories.length / pageSize));
 
   const handleClose = () => {
     if (isSaving) return;
@@ -52,10 +72,11 @@ const CategoryManagement: React.FC<CategoryManagementProps> = ({
         await updateCategory(editingCategory.id, {
           name: trimmedName,
           parentId: parentId || undefined,
+          imageUrl: imageUrl || undefined,
         });
         showToast("Catégorie mise à jour", "success");
       } else {
-        await addCategory(trimmedName, parentId || undefined);
+        await addCategory(trimmedName, parentId || undefined, imageUrl || undefined);
         showToast("Catégorie créée", "success");
       }
       setShowModal(false);
@@ -105,15 +126,26 @@ const CategoryManagement: React.FC<CategoryManagementProps> = ({
                 </td>
               </tr>
             ) : (
-              categories.map((cat) => (
+              pagedCategories.map((cat) => (
                 <tr
                   key={cat.id}
                   className="border-t border-slate-100 hover:bg-slate-50"
                 >
                   <td className="px-4 py-2 font-medium text-slate-700">
-                    {cat.name}
+                    <div className="flex items-center gap-2">
+                      {cat.imageUrl ? (
+                        <img src={cat.imageUrl} alt={cat.name} className="w-8 h-8 rounded object-cover border border-slate-200" />
+                      ) : (
+                        <div className="w-8 h-8 rounded bg-slate-100 border border-slate-200" />
+                      )}
+                      <span>{cat.name}</span>
+                    </div>
                   </td>
-                  <td className="px-4 py-2">{cat.parentId || "—"}</td>
+                  <td className="px-4 py-2">
+                    {cat.parentId
+                      ? (categoriesById.get(String(cat.parentId))?.name ?? "—")
+                      : "—"}
+                  </td>
                   <td className="px-4 py-2">
                     <div className="inline-flex items-center gap-2">
                       <button
@@ -139,6 +171,31 @@ const CategoryManagement: React.FC<CategoryManagementProps> = ({
           </tbody>
         </table>
       </div>
+      {categories.length > pageSize && (
+        <div className="mt-3 flex items-center justify-between text-xs">
+          <span className="text-slate-500">
+            Page {page}/{totalPages} - {categories.length} categories
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="px-3 py-1 rounded border border-slate-200 disabled:opacity-40"
+            >
+              Prec
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="px-3 py-1 rounded border border-slate-200 disabled:opacity-40"
+            >
+              Suiv
+            </button>
+          </div>
+        </div>
+      )}
       {/* Category modal UI would be rendered here using showModal and editingCategory */}
       {/* --- Futuristic Category Modal --- */}
       {showModal && (
@@ -203,6 +260,13 @@ const CategoryManagement: React.FC<CategoryManagementProps> = ({
                   </label>
                   <input
                     type="file"
+                    accept="image/*"
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      if (!f) return;
+                      const u = await uploadCategoryImage(f);
+                      if (u) setImageUrl(u);
+                    }}
                     className="w-full px-4 py-3 rounded-xl border border-slate-200 text-lg"
                   />
                   <label className="block text-lg font-semibold text-slate-700">

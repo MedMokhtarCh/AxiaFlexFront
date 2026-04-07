@@ -706,6 +706,7 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ initialView }) => {
                 addCategory={addCategory}
                 updateCategory={updateCategory}
                 deleteCategory={deleteCategory}
+                uploadCategoryImage={uploadProductImage}
                 showToast={showToast}
               />
             )}

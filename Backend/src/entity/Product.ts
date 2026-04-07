@@ -48,6 +48,9 @@ export class Product {
   @Column('boolean', { default: true })
   visibleInPos!: boolean;
 
+  @Column('boolean', { default: false })
+  favorite!: boolean;
+
   @Column('decimal', { precision: 14, scale: 3, default: 0 })
   stock!: number;
 

@@ -86,6 +86,19 @@ let API_BASE_URL = RAW_API_URL.replace(/\/+$/, "");
 if (!API_BASE_URL && !IS_PROD) {
   API_BASE_URL = "";
 }
+
+const toAbsoluteAssetUrl = (rawUrl: unknown) => {
+  const value = String(rawUrl ?? "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value) || value.startsWith("data:")) return value;
+  if (value.startsWith("/")) return API_BASE_URL ? `${API_BASE_URL}${value}` : value;
+  return API_BASE_URL ? `${API_BASE_URL}/${value}` : value;
+};
+
+const normalizeProductAssets = (p: any): Product => ({
+  ...(p as Product),
+  imageUrl: toAbsoluteAssetUrl((p as any)?.imageUrl),
+});
 // Default to simulated backend when no API_URL is configured or explicitly set to true
 const USE_SIMULATED_BACKEND =
   String((import.meta as any).env?.VITE_USE_SIMULATED_BACKEND ?? "false")
@@ -1962,7 +1975,7 @@ interface POSContextType {
   addProduct: (product: Partial<Product>) => Promise<void>;
   updateProduct: (id: string, updates: Partial<Product>) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
-  addCategory: (name: string, parentId?: string) => Promise<void>;
+  addCategory: (name: string, parentId?: string, imageUrl?: string) => Promise<void>;
   updateCategory: (id: string, updates: Partial<Category>) => Promise<void>;
   deleteCategory: (id: string) => Promise<void>;
   addPromotion: (promotion: Partial<Promotion>) => Promise<void>;
@@ -2569,7 +2582,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
             apiFetchTyped("/pos/suppliers"),
             apiFetchTyped("/pos/stock/warehouses" as any),
           ]);
-        setProducts(p || []);
+        setProducts(((p || []) as any[]).map(normalizeProductAssets));
         setCategories(c || []);
         setZones(z || []);
         setTables(t || []);
@@ -3356,7 +3369,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
       body: JSON.stringify(p),
     });
     if (!s || typeof s !== "object" || !("id" in s)) return;
-    setProducts((prev) => [...prev, s]);
+    setProducts((prev) => [...prev, normalizeProductAssets(s)]);
   };
   const updateProduct = async (id: string, updates: Partial<Product>) => {
     await requireUserConfirmation("Modifier l'article");
@@ -3374,7 +3387,9 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
         body: JSON.stringify(updates),
       },
     );
-    setProducts((prev) => prev.map((p) => (p.id === id ? s : p)));
+    setProducts((prev) =>
+      prev.map((p) => (p.id === id ? normalizeProductAssets(s) : p)),
+    );
   };
   const deleteProduct = async (id: string) => {
     await requireUserConfirmation("Supprimer l'article");
@@ -3386,7 +3401,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
     await apiFetchTypedPath("/pos/products/:id", { id }, { method: "DELETE" });
     setProducts((prev) => prev.filter((p) => p.id !== id));
   };
-  const addCategory = async (name: string, parentId?: string) => {
+  const addCategory = async (name: string, parentId?: string, imageUrl?: string) => {
     requireClaim(
       "action:category.manage",
       [Role.STOCK_MANAGER, Role.MANAGER],
@@ -3395,7 +3410,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
     const s = await apiFetchTyped("/pos/categories", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, parentId }),
+      body: JSON.stringify({ name, parentId, imageUrl }),
     });
     setCategories((prev) => [...prev, s]);
   };
@@ -3744,7 +3759,11 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
       }
       if (result?.product) {
         setProducts((prev) =>
-          prev.map((p) => (p.id === result.product.id ? result.product : p)),
+          prev.map((p) =>
+            p.id === result.product.id
+              ? normalizeProductAssets(result.product)
+              : p,
+          ),
         );
       }
       return true;
@@ -3835,7 +3854,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
     });
     await refreshStockMovements();
     const freshProducts = await apiFetchTyped("/pos/products");
-    setProducts(freshProducts || []);
+    setProducts(((freshProducts || []) as any[]).map(normalizeProductAssets));
     return (saved || null) as StockDocument | null;
   };
 
@@ -3890,7 +3909,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
     )) as StockDocument | null;
     await refreshStockMovements();
     const freshProducts = await apiFetchTyped("/pos/products");
-    setProducts(freshProducts || []);
+    setProducts(((freshProducts || []) as any[]).map(normalizeProductAssets));
     return saved || null;
   };
 
@@ -3912,7 +3931,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
     )) as StockDocument | null;
     await refreshStockMovements();
     const freshProducts = await apiFetchTyped("/pos/products");
-    setProducts(freshProducts || []);
+    setProducts(((freshProducts || []) as any[]).map(normalizeProductAssets));
     return saved || null;
   };
 
@@ -4015,7 +4034,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
         `Upload échoué (${resp.status})`;
       throw new Error(msg);
     }
-    return payload?.imageUrl || null;
+    return toAbsoluteAssetUrl(payload?.imageUrl) || null;
   };
   const updateOrderStatus = async (id: string, status: OrderStatus) => {
     await requireUserConfirmation("Modifier le statut de la commande");

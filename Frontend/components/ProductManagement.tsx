@@ -51,6 +51,8 @@ const ProductManagement: React.FC<ProductManagementProps> = ({
   const [onlyVisible, setOnlyVisible] = useState(false);
   const [warehouseFilterId, setWarehouseFilterId] = useState<string>("");
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
+  const [page, setPage] = useState(1);
+  const pageSize = 18;
   const [sortBy, setSortBy] = useState<
     "name-asc" | "name-desc" | "price-asc" | "price-desc" | "stock-asc" | "stock-desc"
   >("name-asc");
@@ -69,6 +71,7 @@ const ProductManagement: React.FC<ProductManagementProps> = ({
   const [isPack, setIsPack] = useState(false);
   const [manageStock, setManageStock] = useState(true);
   const [visibleInPos, setVisibleInPos] = useState(true);
+  const [favorite, setFavorite] = useState(false);
   const [unit, setUnit] = useState<string>("unit");
   const [baseUnit, setBaseUnit] = useState<string>("unit");
   const [alertLevel, setAlertLevel] = useState<string>("");
@@ -147,6 +150,7 @@ const ProductManagement: React.FC<ProductManagementProps> = ({
     setIsPack(false);
     setManageStock(true);
     setVisibleInPos(true);
+    setFavorite(false);
     setUnit("unit");
     setBaseUnit("unit");
     setAlertLevel("");
@@ -187,6 +191,7 @@ const ProductManagement: React.FC<ProductManagementProps> = ({
       p.stock !== undefined && p.stock !== null ? String(p.stock) : "0",
     );
     setVisibleInPos(p.visibleInPos ?? true);
+    setFavorite(!!p.favorite);
     setUnit(p.unit || "unit");
     setBaseUnit(p.baseUnit || p.unit || "unit");
     setAlertLevel(
@@ -256,6 +261,14 @@ const ProductManagement: React.FC<ProductManagementProps> = ({
     });
     return rows;
   }, [products, search, categoryFilter, onlyVisible, warehouseFilterId, sortBy]);
+  useEffect(() => {
+    setPage(1);
+  }, [search, categoryFilter, onlyVisible, warehouseFilterId, sortBy, viewMode]);
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / pageSize));
+  const pagedProducts = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredProducts.slice(start, start + pageSize);
+  }, [filteredProducts, page]);
 
   const stockByProductWarehouse = useMemo(() => {
     const map = new Map<string, number>();
@@ -445,6 +458,7 @@ const ProductManagement: React.FC<ProductManagementProps> = ({
       stockType,
       stock: stockType === "AUCUN" ? 0 : qty,
       visibleInPos,
+      favorite,
       unit,
       baseUnit,
       alertLevel:
@@ -738,7 +752,7 @@ const ProductManagement: React.FC<ProductManagementProps> = ({
                 </td>
               </tr>
             ) : (
-              filteredProducts.map((p) => (
+              pagedProducts.map((p) => (
                 <tr
                   key={p.id}
                   className="border-t border-slate-100 hover:bg-slate-50/70 transition-colors"
@@ -834,7 +848,7 @@ const ProductManagement: React.FC<ProductManagementProps> = ({
       )}
       {viewMode === "cards" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filteredProducts.map((p) => (
+          {pagedProducts.map((p) => (
             <div
               key={p.id}
               className="rounded-2xl border border-slate-100 bg-white shadow-sm p-4"
@@ -894,6 +908,17 @@ const ProductManagement: React.FC<ProductManagementProps> = ({
               </div>
             </div>
           ))}
+        </div>
+      )}
+      {filteredProducts.length > pageSize && (
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-slate-500">
+            Page {page}/{totalPages} - {filteredProducts.length} articles
+          </span>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} className="px-3 py-1 rounded border border-slate-200 disabled:opacity-40">Prec</button>
+            <button type="button" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className="px-3 py-1 rounded border border-slate-200 disabled:opacity-40">Suiv</button>
+          </div>
         </div>
       )}
 
@@ -1027,6 +1052,15 @@ const ProductManagement: React.FC<ProductManagementProps> = ({
                           className="rounded"
                         />
                         Visible dans POS
+                      </label>
+                      <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={favorite}
+                          onChange={(e) => setFavorite(e.target.checked)}
+                          className="rounded"
+                        />
+                        Article favori
                       </label>
                       <label className="inline-flex items-center gap-2 text-sm text-slate-700">
                         <input

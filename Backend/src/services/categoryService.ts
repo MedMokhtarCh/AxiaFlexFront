@@ -6,9 +6,9 @@ export async function listCategories() {
   return repo.find();
 }
 
-export async function createCategory(name: string, parentId?: string) {
+export async function createCategory(name: string, parentId?: string, imageUrl?: string | null) {
   const repo = AppDataSource.getRepository(Category);
-  const c = repo.create({ name, parentId: parentId || null } as any);
+  const c = repo.create({ name, parentId: parentId || null, imageUrl: imageUrl || null } as any);
   return repo.save(c as any);
 }
 

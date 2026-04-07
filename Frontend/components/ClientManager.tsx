@@ -90,6 +90,8 @@ const ClientManager: React.FC = () => {
     "ALL" | "PAID" | "UNPAID"
   >("ALL");
   const [clientQuery, setClientQuery] = useState("");
+  const [clientPage, setClientPage] = useState(1);
+  const clientPageSize = 12;
   const [showClientExtraFields, setShowClientExtraFields] = useState(false);
   const [datesPreset, setDatesPreset] = useState(false);
   const [clientType, setClientType] = useState<"PERSON" | "COMPANY">("PERSON");
@@ -134,6 +136,17 @@ const ClientManager: React.FC = () => {
       return hay.includes(q);
     });
   }, [clients, clientQuery]);
+  useEffect(() => {
+    setClientPage(1);
+  }, [clientQuery, clients.length]);
+  const clientTotalPages = Math.max(
+    1,
+    Math.ceil(filteredClientsList.length / clientPageSize),
+  );
+  const pagedClients = useMemo(() => {
+    const start = (clientPage - 1) * clientPageSize;
+    return filteredClientsList.slice(start, start + clientPageSize);
+  }, [filteredClientsList, clientPage]);
 
   useEffect(() => {
     if (datesPreset) return;
@@ -725,7 +738,7 @@ const ClientManager: React.FC = () => {
           )}
         </div>
         <div className="-mx-1 max-h-[min(280px,40vh)] space-y-2 overflow-y-auto pr-1 lg:max-h-[calc(100vh-320px)]">
-        {filteredClientsList.map((client) => (
+        {pagedClients.map((client) => (
           <div
             key={client.id}
             className={`w-full flex items-center gap-3 p-3 rounded-2xl transition-all border ${
@@ -792,6 +805,15 @@ const ClientManager: React.FC = () => {
           </div>
         ))}
         </div>
+        {filteredClientsList.length > clientPageSize && (
+          <div className="flex items-center justify-between text-[11px] text-slate-500">
+            <span>Page {clientPage}/{clientTotalPages}</span>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setClientPage((p) => Math.max(1, p - 1))} disabled={clientPage <= 1} className="px-2 py-1 rounded border border-slate-200 disabled:opacity-40">Prec</button>
+              <button type="button" onClick={() => setClientPage((p) => Math.min(clientTotalPages, p + 1))} disabled={clientPage >= clientTotalPages} className="px-2 py-1 rounded border border-slate-200 disabled:opacity-40">Suiv</button>
+            </div>
+          </div>
+        )}
         <button
           type="button"
           onClick={() => setSelectedClient("unassigned")}

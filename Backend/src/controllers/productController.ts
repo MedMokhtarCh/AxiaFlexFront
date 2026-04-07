@@ -61,6 +61,7 @@ export async function createProduct(req: Request, res: Response) {
       imageUrl,
       manageStock,
       visibleInPos,
+      favorite,
       stock,
       isPack,
       subItemIds,
@@ -106,6 +107,7 @@ export async function createProduct(req: Request, res: Response) {
       manageStock: manageStockBool,
       visibleInPos:
         visibleInPos === undefined ? defaultVisibleInPos : Boolean(visibleInPos),
+      favorite: Boolean(favorite),
       stock: manageStockBool ? stockNum : 0,
       isPack: Boolean(isPack),
       subItemIds: Array.isArray(subItemIds) ? subItemIds : undefined,
@@ -146,6 +148,7 @@ export async function patchProduct(req: Request, res: Response) {
       imageUrl,
       manageStock,
       visibleInPos,
+      favorite,
       stock,
       isPack,
       subItemIds,
@@ -171,6 +174,7 @@ export async function patchProduct(req: Request, res: Response) {
     if (imageUrl !== undefined) updates.imageUrl = imageUrl || null;
     if (manageStock !== undefined) updates.manageStock = Boolean(manageStock);
     if (visibleInPos !== undefined) updates.visibleInPos = Boolean(visibleInPos);
+    if (favorite !== undefined) updates.favorite = Boolean(favorite);
     if (stock !== undefined) {
       const stockNum = Number(stock ?? 0);
       if (!Number.isFinite(stockNum)) return res.status(400).json({ error: 'Stock must be a number' });

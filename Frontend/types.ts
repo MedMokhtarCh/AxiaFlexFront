@@ -287,6 +287,7 @@ export interface Category {
   id: string;
   name: string;
   parentId?: string;
+  imageUrl?: string;
 }
 
 export enum OrderType {
@@ -410,6 +411,7 @@ export interface Product {
   stock?: number;
   manageStock: boolean;
   visibleInPos?: boolean;
+  favorite?: boolean;
   promotionPrice?: number;
   promoStart?: number;
   promoEnd?: number;
