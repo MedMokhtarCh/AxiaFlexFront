@@ -57,3 +57,4 @@ Ce mode:
 
 - Cette version demarre un worker local `src/agent-worker.js` (independant de `Agent/index.js`).
 - Pour installer/supprimer le service depuis l'UI, lancer AppWin en mode administrateur.
+- Les scripts service et le worker sont integres dans `AppWin/resources/agent` et embarques dans le build (`extraResources`), sans dependance au dossier `Agent/` du repo.

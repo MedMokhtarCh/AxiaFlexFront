@@ -27,6 +27,15 @@
       "src/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "resources/agent",
+        "to": "agent",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "win": {
       "signAndEditExecutable": false,
       "target": [

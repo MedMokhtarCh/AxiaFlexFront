@@ -49,11 +49,28 @@ function pushLog(line) {
 }
 
 function resolveAgentPath() {
-  return path.resolve(__dirname, "agent-worker.js");
+  const candidates = [
+    path.resolve(__dirname, "agent-worker.js"),
+    path.resolve(process.resourcesPath || "", "agent", "agent-worker.js"),
+  ];
+  return findFirstExistingPath(candidates);
+}
+
+function findFirstExistingPath(candidates) {
+  for (const p of candidates) {
+    try {
+      if (p && fs.existsSync(p)) return p;
+    } catch {}
+  }
+  return null;
 }
 
 function resolvePsScript(name) {
-  return path.resolve(__dirname, "..", "..", "Agent", name);
+  const candidates = [
+    path.resolve(process.resourcesPath || "", "agent", name),
+    path.resolve(process.cwd(), "resources", "agent", name),
+  ];
+  return findFirstExistingPath(candidates);
 }
 
 function runPowershellScript(scriptPath, args = []) {
@@ -109,10 +126,10 @@ function runPowershellCommand(command) {
 function startAgent(config) {
   if (agentProcess) return { ok: false, error: "Agent déjà démarré." };
   const agentScriptPath = resolveAgentPath();
-  if (!fs.existsSync(agentScriptPath)) {
+  if (!agentScriptPath) {
     return {
       ok: false,
-      error: "Agent/index.js introuvable (vérifiez la structure du projet).",
+      error: "agent-worker.js introuvable (vérifiez AppWin/resources/agent).",
     };
   }
   const env = {
@@ -223,7 +240,7 @@ app.whenReady().then(() => {
   ipcMain.handle("service:install", async () => {
     const cfg = currentConfig || loadConfig();
     const scriptPath = resolvePsScript("install-service.ps1");
-    if (!fs.existsSync(scriptPath)) {
+    if (!scriptPath) {
       return { ok: false, error: "install-service.ps1 introuvable dans Agent/" };
     }
     const args = [
@@ -244,7 +261,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle("service:uninstall", async () => {
     const scriptPath = resolvePsScript("uninstall-service.ps1");
-    if (!fs.existsSync(scriptPath)) {
+    if (!scriptPath) {
       return { ok: false, error: "uninstall-service.ps1 introuvable dans Agent/" };
     }
     return runPowershellScript(scriptPath, ["-ServiceName", "AxiaFlexPrintAgent"]);
