@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AxiaFlex AppWin</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>AxiaFlex AppWin (Electron)</h1>
+      <p class="subtitle">
+        Configuration et contrôle du Print Agent local (USB / réseau).
+      </p>
+
+      <section class="card">
+        <h2>Configuration agent</h2>
+        <div class="grid">
+          <label>
+            Cloud API URL
+            <input id="cloudApiUrl" placeholder="https://axiaflex-backend.onrender.com" />
+          </label>
+          <label>
+            AGENT_MASTER_TOKEN
+            <input id="agentMasterToken" type="password" placeholder="token maître" />
+          </label>
+          <label>
+            Alias terminal
+            <input id="terminalAlias" placeholder="TERMINAL-1" />
+          </label>
+          <label>
+            Nom du site
+            <input id="siteName" placeholder="SITE-A" />
+          </label>
+          <label>
+            Polling (ms)
+            <input id="pollMs" type="number" min="1500" step="500" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="saveBtn">Enregistrer config</button>
+          <button id="startBtn" class="success">Démarrer agent</button>
+          <button id="stopBtn" class="danger">Arrêter agent</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Statut</h2>
+        <p id="statusText">Agent: inconnu</p>
+        <p id="agentPathText" class="muted"></p>
+        <p id="serviceStatusText" class="muted"></p>
+      </section>
+
+      <section class="card">
+        <h2>Service Windows</h2>
+        <p class="muted">
+          Lance l'installation automatique en mode service (demarrage auto au boot).
+          Ouvrir AppWin en administrateur.
+        </p>
+        <div class="actions">
+          <button id="installServiceBtn" class="success">Installer service</button>
+          <button id="uninstallServiceBtn" class="danger">Desinstaller service</button>
+          <button id="refreshServiceBtn">Rafraichir statut service</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Imprimantes locales</h2>
+        <div class="actions">
+          <button id="refreshPrintersBtn">Detecter imprimantes</button>
+        </div>
+        <select id="printersSelect"></select>
+        <textarea
+          id="testPrintText"
+          rows="4"
+          placeholder="Texte de test impression"
+        ></textarea>
+        <div class="actions">
+          <button id="testPrintBtn" class="success">Test impression</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Logs agent</h2>
+        <pre id="logs"></pre>
+      </section>
+    </main>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>

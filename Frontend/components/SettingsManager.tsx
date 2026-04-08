@@ -3987,7 +3987,66 @@ const SettingsManager: React.FC = () => {
         )}
 
         {activeTab === "hardware" && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 gap-8">
+            <div className="bg-white p-8 rounded-[2rem] border border-slate-100 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-lg font-black text-slate-800">
+                  Terminaux connectés
+                </h3>
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                  {terminalNodes.length} terminal
+                  {terminalNodes.length > 1 ? "s" : ""}
+                </span>
+              </div>
+              {terminalNodes.length === 0 ? (
+                <p className="text-sm font-bold text-slate-500">
+                  Aucun terminal agent détecté pour le moment.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {terminalNodes.map((t) => (
+                    <div
+                      key={t.id}
+                      className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-black text-slate-800 truncate">
+                          {t.alias}
+                        </p>
+                        <span
+                          className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${
+                            t.online
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-rose-100 text-rose-700"
+                          }`}
+                        >
+                          {t.online ? "online" : "offline"}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 font-bold truncate">
+                        Site: {t.siteName || "—"}
+                      </p>
+                      <p className="text-[11px] text-slate-500 font-bold truncate">
+                        Dernière activité:{" "}
+                        {t.lastSeenAt
+                          ? new Date(Number(t.lastSeenAt)).toLocaleString()
+                          : "—"}
+                      </p>
+                      <p className="text-[11px] text-slate-500 font-bold truncate">
+                        Fingerprint: {String(t.fingerprintHash || "").slice(0, 12)}
+                        ...
+                      </p>
+                      <p className="text-[11px] text-indigo-600 font-black truncate">
+                        Imprimantes détectées:{" "}
+                        {Array.isArray(t.printers) ? t.printers.length : 0}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="bg-white p-10 rounded-[3rem] border border-slate-100 space-y-6">
               <h3 className="text-xl font-black text-slate-800">Imprimantes</h3>
               <div className="space-y-4">
@@ -4300,6 +4359,7 @@ const SettingsManager: React.FC = () => {
                 </div>
               </div>
             </div>
+          </div>
           </div>
         )}
 

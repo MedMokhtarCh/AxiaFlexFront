@@ -119,6 +119,12 @@ const SuperAdminDashboard: React.FC<Props> = ({ token, onExit }) => {
   const [devLogContent, setDevLogContent] = useState<string>("");
   const [devLogNote, setDevLogNote] = useState("");
   const [devLogBusy, setDevLogBusy] = useState(false);
+  const [agentCloudApiUrl, setAgentCloudApiUrl] = useState(API_BASE);
+  const [agentMasterToken, setAgentMasterToken] = useState("");
+  const [agentTerminalAlias, setAgentTerminalAlias] = useState("TERMINAL-1");
+  const [agentSiteName, setAgentSiteName] = useState("SITE-A");
+  const [agentPollMs, setAgentPollMs] = useState("3000");
+  const [agentServiceName, setAgentServiceName] = useState("AxiaFlexPrintAgent");
 
   const load = useCallback(async () => {
     setErr("");
@@ -320,6 +326,46 @@ const SuperAdminDashboard: React.FC<Props> = ({ token, onExit }) => {
       setSyncing(false);
     }
   };
+
+  const sanitizeForPowershell = (value: string) => value.replaceAll("'", "''");
+
+  const downloadTextFile = (filename: string, content: string, mime: string) => {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const buildAgentInstallScript = () => {
+    const poll = Math.max(1500, Number.parseInt(agentPollMs, 10) || 3000);
+    return [
+      "$ErrorActionPreference = 'Stop'",
+      "$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path",
+      "$installScript = Join-Path $scriptDir 'install-service.ps1'",
+      "if (-not (Test-Path $installScript)) { throw 'install-service.ps1 introuvable dans le même dossier.' }",
+      "",
+      "& $installScript `",
+      `  -CloudApiUrl '${sanitizeForPowershell(agentCloudApiUrl.trim())}' \``,
+      `  -AgentMasterToken '${sanitizeForPowershell(agentMasterToken.trim())}' \``,
+      `  -TerminalAlias '${sanitizeForPowershell(agentTerminalAlias.trim() || "TERMINAL-1")}' \``,
+      `  -SiteName '${sanitizeForPowershell(agentSiteName.trim() || "SITE-A")}' \``,
+      `  -PollMs ${poll} \``,
+      `  -ServiceName '${sanitizeForPowershell(agentServiceName.trim() || "AxiaFlexPrintAgent")}'`,
+      "",
+      "Write-Host 'Installation terminée.' -ForegroundColor Green",
+    ].join("\n");
+  };
+
+  const buildAgentInstallCmd = () =>
+    [
+      "@echo off",
+      "setlocal",
+      'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-agent-generated.ps1"',
+      "endlocal",
+    ].join("\r\n");
 
   const allIds = data?.allModuleIds?.length
     ? data.allModuleIds
@@ -712,6 +758,114 @@ const SuperAdminDashboard: React.FC<Props> = ({ token, onExit }) => {
                     </span>
                   </label>
                 ))}
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900 p-6 space-y-4">
+              <h2 className="text-sm font-black uppercase tracking-widest text-violet-400">
+                Assistant agent impression (GUI)
+              </h2>
+              <p className="text-xs text-slate-400 font-bold leading-relaxed">
+                Oui, c&apos;est possible en interface graphique: remplissez les champs
+                puis téléchargez le script généré. Exécutez ensuite le fichier sur le
+                terminal Windows concerné (même dossier que{" "}
+                <code className="text-slate-300">install-service.ps1</code>).
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="md:col-span-2">
+                  <label className="text-[10px] font-black uppercase text-slate-500">
+                    Cloud API URL
+                  </label>
+                  <input
+                    value={agentCloudApiUrl}
+                    onChange={(e) => setAgentCloudApiUrl(e.target.value)}
+                    className="mt-1 w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-sm font-bold"
+                    placeholder="https://axiaflex-backend.onrender.com"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="text-[10px] font-black uppercase text-slate-500">
+                    AGENT_MASTER_TOKEN
+                  </label>
+                  <input
+                    value={agentMasterToken}
+                    onChange={(e) => setAgentMasterToken(e.target.value)}
+                    className="mt-1 w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-sm font-bold"
+                    placeholder="token maître agent"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-500">
+                    Alias terminal
+                  </label>
+                  <input
+                    value={agentTerminalAlias}
+                    onChange={(e) => setAgentTerminalAlias(e.target.value)}
+                    className="mt-1 w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-sm font-bold"
+                    placeholder="TERMINAL-1"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-500">
+                    Nom du site
+                  </label>
+                  <input
+                    value={agentSiteName}
+                    onChange={(e) => setAgentSiteName(e.target.value)}
+                    className="mt-1 w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-sm font-bold"
+                    placeholder="SITE-A"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-500">
+                    Polling (ms)
+                  </label>
+                  <input
+                    value={agentPollMs}
+                    onChange={(e) => setAgentPollMs(e.target.value)}
+                    className="mt-1 w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-sm font-bold"
+                    placeholder="3000"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-500">
+                    Nom du service
+                  </label>
+                  <input
+                    value={agentServiceName}
+                    onChange={(e) => setAgentServiceName(e.target.value)}
+                    className="mt-1 w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-sm font-bold"
+                    placeholder="AxiaFlexPrintAgent"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadTextFile(
+                      "install-agent-generated.ps1",
+                      buildAgentInstallScript(),
+                      "text/plain;charset=utf-8",
+                    )
+                  }
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-[10px] font-black uppercase tracking-widest"
+                >
+                  Télécharger PS1
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadTextFile(
+                      "install-agent-generated.cmd",
+                      buildAgentInstallCmd(),
+                      "text/plain;charset=utf-8",
+                    )
+                  }
+                  className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-[10px] font-black uppercase tracking-widest"
+                >
+                  Télécharger CMD
+                </button>
               </div>
             </section>
 

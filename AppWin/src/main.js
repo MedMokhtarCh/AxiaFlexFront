@@ -1,0 +1,271 @@
+const { app, BrowserWindow, ipcMain } = require("electron");
+const path = require("node:path");
+const fs = require("node:fs");
+const { spawn } = require("node:child_process");
+const os = require("node:os");
+
+let mainWindow = null;
+let agentProcess = null;
+let agentLogs = [];
+let currentConfig = null;
+
+function getConfigPath() {
+  return path.join(app.getPath("userData"), "agent-config.json");
+}
+
+function getDefaultConfig() {
+  return {
+    cloudApiUrl: "https://axiaflex-backend.onrender.com",
+    agentMasterToken: "",
+    terminalAlias: "TERMINAL-1",
+    siteName: "SITE-A",
+    pollMs: 3000,
+  };
+}
+
+function loadConfig() {
+  const p = getConfigPath();
+  if (!fs.existsSync(p)) return getDefaultConfig();
+  try {
+    const raw = fs.readFileSync(p, "utf8");
+    const parsed = JSON.parse(raw);
+    return { ...getDefaultConfig(), ...parsed };
+  } catch {
+    return getDefaultConfig();
+  }
+}
+
+function saveConfig(config) {
+  fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2), "utf8");
+}
+
+function pushLog(line) {
+  const entry = `[${new Date().toLocaleString()}] ${line}`;
+  agentLogs.push(entry);
+  if (agentLogs.length > 500) agentLogs = agentLogs.slice(-500);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("agent-log", entry);
+  }
+}
+
+function resolveAgentPath() {
+  return path.resolve(__dirname, "agent-worker.js");
+}
+
+function resolvePsScript(name) {
+  return path.resolve(__dirname, "..", "..", "Agent", name);
+}
+
+function runPowershellScript(scriptPath, args = []) {
+  return new Promise((resolve) => {
+    const psArgs = [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      scriptPath,
+      ...args,
+    ];
+    const proc = spawn("powershell", psArgs, {
+      windowsHide: true,
+      cwd: path.dirname(scriptPath),
+      env: process.env,
+    });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (d) => {
+      stdout += String(d || "");
+    });
+    proc.stderr.on("data", (d) => {
+      stderr += String(d || "");
+    });
+    proc.on("close", (code) => {
+      resolve({ ok: code === 0, code, stdout: stdout.trim(), stderr: stderr.trim() });
+    });
+  });
+}
+
+function runPowershellCommand(command) {
+  return new Promise((resolve) => {
+    const proc = spawn(
+      "powershell",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+      { windowsHide: true },
+    );
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (d) => {
+      stdout += String(d || "");
+    });
+    proc.stderr.on("data", (d) => {
+      stderr += String(d || "");
+    });
+    proc.on("close", (code) => {
+      resolve({ ok: code === 0, code, stdout: stdout.trim(), stderr: stderr.trim() });
+    });
+  });
+}
+
+function startAgent(config) {
+  if (agentProcess) return { ok: false, error: "Agent déjà démarré." };
+  const agentScriptPath = resolveAgentPath();
+  if (!fs.existsSync(agentScriptPath)) {
+    return {
+      ok: false,
+      error: "Agent/index.js introuvable (vérifiez la structure du projet).",
+    };
+  }
+  const env = {
+    ...process.env,
+    CLOUD_API_URL: String(config.cloudApiUrl || "").trim(),
+    AGENT_MASTER_TOKEN: String(config.agentMasterToken || "").trim(),
+    TERMINAL_ALIAS: String(config.terminalAlias || "TERMINAL-1").trim(),
+    SITE_NAME: String(config.siteName || "SITE-A").trim(),
+    AGENT_POLL_MS: String(Math.max(1500, Number(config.pollMs) || 3000)),
+  };
+
+  agentProcess = spawn(process.execPath, [agentScriptPath], {
+    cwd: path.dirname(agentScriptPath),
+    env,
+    windowsHide: true,
+  });
+
+  pushLog("Agent démarré.");
+  agentProcess.stdout.on("data", (buf) => pushLog(buf.toString().trim()));
+  agentProcess.stderr.on("data", (buf) => pushLog(`ERR: ${buf.toString().trim()}`));
+  agentProcess.on("close", (code) => {
+    pushLog(`Agent arrêté (code ${code ?? "?"}).`);
+    agentProcess = null;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("agent-status", false);
+    }
+  });
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("agent-status", true);
+  }
+  return { ok: true };
+}
+
+function stopAgent() {
+  if (!agentProcess) return { ok: false, error: "Agent non démarré." };
+  agentProcess.kill();
+  agentProcess = null;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("agent-status", false);
+  }
+  pushLog("Arrêt demandé.");
+  return { ok: true };
+}
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 980,
+    height: 760,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
+}
+
+app.whenReady().then(() => {
+  currentConfig = loadConfig();
+  createWindow();
+
+  ipcMain.handle("config:get", () => currentConfig);
+  ipcMain.handle("config:save", (_event, cfg) => {
+    currentConfig = {
+      ...getDefaultConfig(),
+      ...cfg,
+      pollMs: Math.max(1500, Number(cfg?.pollMs) || 3000),
+    };
+    saveConfig(currentConfig);
+    return { ok: true };
+  });
+  ipcMain.handle("agent:start", () => startAgent(currentConfig || loadConfig()));
+  ipcMain.handle("agent:stop", () => stopAgent());
+  ipcMain.handle("agent:status", () => ({
+    running: Boolean(agentProcess),
+    logs: agentLogs,
+    agentScriptPath: resolveAgentPath(),
+  }));
+  ipcMain.handle("agent:detect-printers", async () => {
+    const script =
+      "$items=@(); " +
+      "try { $items += Get-Printer | Select-Object Name,DriverName,PortName } catch {}; " +
+      "try { $items += Get-CimInstance Win32_Printer | Select-Object @{n='Name';e={$_.Name}},@{n='DriverName';e={$_.DriverName}},@{n='PortName';e={$_.PortName}} } catch {}; " +
+      "$dedup = $items | Where-Object { $_.Name } | Group-Object Name | ForEach-Object { $_.Group | Select-Object -First 1 }; " +
+      "$dedup | ConvertTo-Json -Compress";
+    const out = await runPowershellCommand(script);
+    if (!out.ok) return { ok: false, error: out.stderr || out.stdout || "detect failed", printers: [] };
+    try {
+      const data = JSON.parse(out.stdout || "[]");
+      return { ok: true, printers: Array.isArray(data) ? data : [data] };
+    } catch {
+      return { ok: true, printers: [] };
+    }
+  });
+  ipcMain.handle("agent:test-print", async (_event, printerName, text) => {
+    const safePrinter = String(printerName || "").replaceAll("'", "''");
+    const safeText = String(text || "").replaceAll("'", "''");
+    const cmd =
+      `$p='${safePrinter}'; $t='${safeText}'; ` +
+      "$tmp=Join-Path $env:TEMP ('axiaflex-test-'+[Guid]::NewGuid().ToString()+'.txt'); " +
+      "Set-Content -LiteralPath $tmp -Value $t -Encoding utf8; " +
+      "Get-Content -LiteralPath $tmp | Out-Printer -Name $p; " +
+      "Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue";
+    const out = await runPowershellCommand(cmd);
+    return { ok: out.ok, error: out.ok ? null : out.stderr || out.stdout || "print failed" };
+  });
+  ipcMain.handle("service:install", async () => {
+    const cfg = currentConfig || loadConfig();
+    const scriptPath = resolvePsScript("install-service.ps1");
+    if (!fs.existsSync(scriptPath)) {
+      return { ok: false, error: "install-service.ps1 introuvable dans Agent/" };
+    }
+    const args = [
+      "-CloudApiUrl",
+      String(cfg.cloudApiUrl || ""),
+      "-AgentMasterToken",
+      String(cfg.agentMasterToken || ""),
+      "-TerminalAlias",
+      String(cfg.terminalAlias || os.hostname()),
+      "-SiteName",
+      String(cfg.siteName || ""),
+      "-PollMs",
+      String(Math.max(1500, Number(cfg.pollMs) || 3000)),
+      "-ServiceName",
+      "AxiaFlexPrintAgent",
+    ];
+    return runPowershellScript(scriptPath, args);
+  });
+  ipcMain.handle("service:uninstall", async () => {
+    const scriptPath = resolvePsScript("uninstall-service.ps1");
+    if (!fs.existsSync(scriptPath)) {
+      return { ok: false, error: "uninstall-service.ps1 introuvable dans Agent/" };
+    }
+    return runPowershellScript(scriptPath, ["-ServiceName", "AxiaFlexPrintAgent"]);
+  });
+  ipcMain.handle("service:status", async () => {
+    const out = await runPowershellCommand(
+      "Get-Service AxiaFlexPrintAgent -ErrorAction SilentlyContinue | Select-Object Name,Status,StartType | ConvertTo-Json -Compress",
+    );
+    if (!out.ok || !out.stdout) return { ok: true, status: null };
+    try {
+      return { ok: true, status: JSON.parse(out.stdout) };
+    } catch {
+      return { ok: true, status: null };
+    }
+  });
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
+});
