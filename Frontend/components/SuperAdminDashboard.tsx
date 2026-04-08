@@ -37,6 +37,7 @@ type LicenseDto = {
   externalLicenseVerifyPath?: string | null;
   externalLicenseTenantId?: string | null;
   externalLicenseApiTokenConfigured?: boolean;
+  appliedCompanyType?: string | null;
 };
 
 const MODULE_LABELS: Record<string, string> = {
@@ -666,6 +667,26 @@ const SuperAdminDashboard: React.FC<Props> = ({ token, onExit }) => {
                   </select>
                 </div>
               )}
+              <div className="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  Type appliqué en base
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="rounded-lg bg-slate-700 px-3 py-1 text-xs font-black text-slate-100">
+                    {String(data?.appliedCompanyType || forcedCompanyType || "N/A")
+                      .replaceAll("_", " ")}
+                  </span>
+                  {companyTypeManaged ? (
+                    <span className="rounded-lg bg-emerald-500/20 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-300 border border-emerald-500/30">
+                      verrouillé SaaS
+                    </span>
+                  ) : (
+                    <span className="rounded-lg bg-amber-500/20 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-amber-300 border border-amber-500/30">
+                      modifiable localement
+                    </span>
+                  )}
+                </div>
+              </div>
             </section>
 
             <section className="rounded-2xl border border-slate-800 bg-slate-900 p-6 space-y-4">

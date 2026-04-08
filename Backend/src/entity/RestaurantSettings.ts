@@ -26,6 +26,10 @@ export class RestaurantSettings {
   @Column('varchar', { nullable: true })
   address?: string;
 
+  /** Notes cuisine rapides proposées au POS. */
+  @Column({ type: 'jsonb', nullable: true })
+  predefinedNotes?: unknown;
+
   @Column('decimal', { precision: 10, scale: 3, default: 0 })
   timbreValue!: number;
 
@@ -90,6 +94,10 @@ export class RestaurantSettings {
 
   @Column('varchar', { nullable: true })
   terminalId?: string | null;
+
+  /** Préférence d'affichage du plan de salle (globale, stockée en DB). */
+  @Column('varchar', { default: 'plan' })
+  roomDisplayMode!: 'plan' | 'simple';
 
   @Column('varchar', { default: 'TK-' })
   ticketPrefix!: string;

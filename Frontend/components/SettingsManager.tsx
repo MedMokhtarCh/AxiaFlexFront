@@ -3,13 +3,6 @@ import { usePOS } from "../store/POSContext";
 import { notifyError, notifySuccess } from "../utils/notify";
 import { printerBonProfile, isReceiptPrinter } from "../utils/printerUtils";
 import {
-  getRoomDisplayMode,
-  ROOM_DISPLAY_STORAGE_KEY,
-  setRoomDisplayMode as persistRoomDisplayMode,
-  subscribeRoomDisplayMode,
-  type RoomDisplayMode,
-} from "../utils/roomDisplayPreference";
-import {
   formatAdminLogEntryFriendly,
   parseAdminLogJsonl,
 } from "../utils/adminLogHumanReadable";
@@ -341,7 +334,7 @@ const SettingsManager: React.FC = () => {
   const [newTableZone, setNewTableZone] = useState("");
   const [newTableCap, setNewTableCap] = useState("4");
   const [posRoomDisplayMode, setPosRoomDisplayMode] =
-    useState<RoomDisplayMode>(() => getRoomDisplayMode());
+    useState<"plan" | "simple">("plan");
 
   const [adminLogDays, setAdminLogDays] = useState<string[]>([]);
   const [adminLogDate, setAdminLogDate] = useState<string>("");
@@ -678,8 +671,10 @@ const SettingsManager: React.FC = () => {
   }, [activeTab, currentUser?.id, currentUser?.role, adminLogDate]);
 
   useEffect(() => {
-    return subscribeRoomDisplayMode((mode) => setPosRoomDisplayMode(mode));
-  }, []);
+    const dbMode = (settings as any)?.roomDisplayMode;
+    if (dbMode === "plan" || dbMode === "simple") setPosRoomDisplayMode(dbMode);
+    else setPosRoomDisplayMode("plan");
+  }, [settings]);
 
   // Notes States
   const [newNote, setNewNote] = useState("");
@@ -1842,11 +1837,10 @@ const SettingsManager: React.FC = () => {
                   Affichage du plan de salle au POS
                 </h4>
                 <p className="mt-2 text-xs font-medium leading-relaxed text-slate-600">
-                  Réglage stocké en <strong>local</strong> sur ce navigateur
-                  (clé <code className="rounded bg-slate-100 px-1 text-[10px]">{ROOM_DISPLAY_STORAGE_KEY}</code>
-                  ). Utile pour choisir par défaut la grille simple ou le plan
-                  dessiné en paramètres ; le même choix peut être modifié
-                  directement sur l&apos;écran « Plan de salle ».
+                  Réglage stocké en <strong>base de données</strong> et partagé
+                  sur tous les postes. Utile pour choisir par défaut la grille
+                  simple ou le plan dessiné en paramètres ; le même choix peut
+                  être modifié directement sur l&apos;écran « Plan de salle ».
                 </p>
                 <div className="mt-5">
                   <label className="mb-2 ml-1 block text-[10px] font-black uppercase tracking-widest text-slate-500">
@@ -1855,12 +1849,20 @@ const SettingsManager: React.FC = () => {
                   <select
                     value={posRoomDisplayMode}
                     onChange={(e) => {
-                      const v = e.target.value as RoomDisplayMode;
+                      const v = e.target.value as "plan" | "simple";
                       setPosRoomDisplayMode(v);
-                      persistRoomDisplayMode(v);
-                      notifySuccess(
-                        "Préférence du plan enregistrée sur ce poste.",
-                      );
+                      updateSettings({ roomDisplayMode: v } as any)
+                        .then(() =>
+                          notifySuccess(
+                            "Préférence du plan enregistrée en base.",
+                          ),
+                        )
+                        .catch((err: any) =>
+                          notifyError(
+                            err?.message ||
+                              "Impossible d'enregistrer la préférence du plan.",
+                          ),
+                        );
                     }}
                     className="w-full rounded-2xl border border-slate-200 bg-white px-6 py-4 font-bold outline-none focus:border-indigo-500"
                   >

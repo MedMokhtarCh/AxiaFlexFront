@@ -299,6 +299,12 @@ export const openApiPaths: Record<string, PathItem> = {
   '/pos/settings/pdf-archives/download': {
     get: op('Settings', 'Télécharger un fichier d\'archive PDF'),
   },
+  '/pos/settings/migration-reports': {
+    get: op('Settings', 'Lister les rapports de migration legacy (query userId)'),
+  },
+  '/pos/settings/migration-reports/latest': {
+    get: op('Settings', 'Lire le dernier rapport de migration legacy (query userId)'),
+  },
 
   '/pos/stock/movements': {
     get: op('Stock', 'Mouvements de stock'),

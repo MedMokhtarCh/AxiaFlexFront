@@ -268,6 +268,7 @@ interface AppSettings {
   address: string;
   predefinedNotes: string[];
   terminalId?: string;
+  roomDisplayMode?: "plan" | "simple";
   ticketPrefix?: string;
   orderPrefix?: string;
   invoicePrefix?: string;
@@ -400,6 +401,7 @@ const SimulatedBackend = {
       },
       paymentSoundEnabled: true,
       currency: "DT",
+      roomDisplayMode: "plan",
       restaurantName: "AxiaFlex",
       logoUrl: "",
       phone: "",
@@ -2376,29 +2378,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
         },
       },
     };
-    try {
-      const raw = localStorage.getItem("axiaflex_settings");
-      if (!raw) return defaults;
-      const parsed = JSON.parse(raw);
-      const merged = { ...defaults, ...parsed };
-      if (
-        !Array.isArray(merged.posDiscountPresets) ||
-        merged.posDiscountPresets.length === 0
-      ) {
-        merged.posDiscountPresets = [...DEFAULT_POS_DISCOUNT_PRESETS];
-      }
-      if (!merged.externalRestaurantCardApi) {
-        merged.externalRestaurantCardApi = {
-          enabled: false,
-          url: "",
-          token: "",
-          timeoutMs: 8000,
-        };
-      }
-      return merged;
-    } catch {
-      return defaults;
-    }
+    return defaults;
   });
 
   const useSimulatedBackend = USE_SIMULATED_BACKEND;
@@ -4086,7 +4066,6 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
                 ? "SHIFT_HANDOVER"
                 : "INDEPENDENT";
       }
-      localStorage.setItem("axiaflex_settings", JSON.stringify(next));
       return next;
     });
     await apiFetchTyped("/pos/settings", {

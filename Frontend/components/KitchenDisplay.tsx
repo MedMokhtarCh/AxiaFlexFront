@@ -174,7 +174,8 @@ const KitchenDisplay: React.FC = () => {
         (o) =>
           o.status !== OrderStatus.COMPLETED &&
           o.status !== OrderStatus.CANCELLED &&
-          o.status !== OrderStatus.INVOICED,
+          o.status !== OrderStatus.INVOICED &&
+          o.status !== OrderStatus.DELIVERED,
       ),
     [normalizedOrders],
   );
@@ -353,6 +354,27 @@ const KitchenDisplay: React.FC = () => {
     ],
   );
 
+  const applyOrderDelivered = useCallback(
+    async (order: Order, allItems: OrderItem[]) => {
+      if (!(role === Role.SERVER || role === Role.ADMIN)) return;
+      const nextItems = allItems.map((it) => ({
+        ...it,
+        prepStatus: OrderStatus.DELIVERED,
+      }));
+      await updateOrder(
+        order.id,
+        nextItems as any[],
+        order.total,
+        order.discount,
+        false,
+        OrderStatus.DELIVERED,
+        undefined,
+        { skipConfirmation: true },
+      );
+    },
+    [role, updateOrder],
+  );
+
   const stationTitle =
     effectiveFilter === "ALL"
       ? isFullTicketRole
@@ -478,7 +500,7 @@ const KitchenDisplay: React.FC = () => {
                       : p === OrderStatus.PREPARING
                         ? "Marquer prêt"
                         : role === Role.SERVER && p === OrderStatus.READY
-                          ? "Servi"
+                          ? "Servi (article)"
                         : "—";
 
                   return (
@@ -540,6 +562,34 @@ const KitchenDisplay: React.FC = () => {
                   );
                 })}
               </div>
+
+              {(role === Role.SERVER || role === Role.ADMIN) && (
+                <div className="mb-4">
+                  {allItems.length > 0 &&
+                  allItems.every(
+                    (it) =>
+                      prepOfItem(it) === OrderStatus.READY ||
+                      prepOfItem(it) === OrderStatus.DELIVERED,
+                  ) ? (
+                    <button
+                      type="button"
+                      onClick={() => applyOrderDelivered(order, allItems)}
+                      className="w-full px-4 py-3 rounded-xl bg-emerald-600 text-white text-[10px] sm:text-[9px] font-black uppercase tracking-widest hover:bg-emerald-700 min-h-11"
+                    >
+                      Servi (commande complète)
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full px-4 py-3 rounded-xl bg-slate-200 text-slate-400 text-[10px] sm:text-[9px] font-black uppercase tracking-widest cursor-not-allowed min-h-11"
+                      title="Disponible quand tous les articles sont prêts."
+                    >
+                      Servi (commande complète)
+                    </button>
+                  )}
+                </div>
+              )}
 
               <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-slate-400">
                 {order.type === OrderType.DELIVERY ? (

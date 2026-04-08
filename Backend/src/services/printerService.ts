@@ -12,6 +12,7 @@ import { TicketItem } from '../entity/TicketItem.js';
 import { OrderItem } from '../entity/OrderItem.js';
 import { User } from '../entity/User.js';
 import { getSettings } from './settingsService.js';
+import { savePdfArchiveFromFile } from './pdfArchiveService.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -264,11 +265,18 @@ export async function saveCategorizedPdf(opts: {
 		(acc, seg) => path.join(acc, sanitizeFileName(seg, 'misc')),
 		baseDir,
 	);
-	return saveTextAsPdf(opts.prefix, opts.text, {
+	const filePath = await saveTextAsPdf(opts.prefix, opts.text, {
 		directory,
 		fixedFileName: opts.fixedFileName,
     ticketTemplate: opts.ticketTemplate,
 	});
+  const rel = path.relative(baseDir, filePath);
+  await savePdfArchiveFromFile({
+    category: sanitizeFileName(safePath[0] || 'misc', 'misc'),
+    relativePath: rel,
+    absolutePath: filePath,
+  }).catch(() => undefined);
+  return filePath;
 }
 
 const printText = async (printerName: string, text: string) => {
@@ -603,6 +611,11 @@ export async function printPaymentReceipt(order: any, ticket: Ticket, paymentMet
     (doc as any).end();
   });
   const savedPdf = pdfPath;
+  await savePdfArchiveFromFile({
+    category: 'tickets_client',
+    relativePath: path.relative(baseDir, pdfPath),
+    absolutePath: pdfPath,
+  }).catch(() => undefined);
   console.info(`[print] Reçu PDF sauvegardé: ${savedPdf}`);
   const assignedName = await resolvePhysicalPrinterNameForOrderServer(order);
   const printTarget = assignedName || receipt?.name;
@@ -681,6 +694,11 @@ export async function printProvisionalClientReceipt(orderId: string) {
     (doc as any).end();
   });
   console.info(`[print] Reçu provisoire PDF sauvegardé: ${pdfPath}`);
+  await savePdfArchiveFromFile({
+    category: 'tickets_client',
+    relativePath: path.relative(baseDir, pdfPath),
+    absolutePath: pdfPath,
+  }).catch(() => undefined);
   const assignedName = await resolvePhysicalPrinterNameForOrderServer(order);
   const printTarget = assignedName || receipt?.name;
   if (!printTarget) {

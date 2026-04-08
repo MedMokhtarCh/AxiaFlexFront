@@ -8,6 +8,7 @@
     "start": "node dist/index.js",
     "build": "tsc -p .",
     "db:init": "tsx src/scripts/initDeploymentDb.ts",
+    "db:migrate-legacy-storage": "tsx src/scripts/migrateLegacyStorageToDb.ts",
     "db:reset-seed": "tsx src/scripts/resetAndSeed.ts",
     "test": "vitest run",
     "test:watch": "vitest"

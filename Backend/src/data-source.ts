@@ -36,6 +36,8 @@ import { RestaurantVoucher } from './entity/RestaurantVoucher.js';
 import { RestaurantCard } from './entity/RestaurantCard.js';
 import { RestaurantCardMovement } from './entity/RestaurantCardMovement.js';
 import { SaasTenantLicense } from './entity/SaasTenantLicense.js';
+import { AuditLogEntry } from './entity/AuditLogEntry.js';
+import { PdfArchiveEntry } from './entity/PdfArchiveEntry.js';
 
 // Fix for TypeScript: declare DATABASE_URL in process.env
 declare global {
@@ -120,5 +122,7 @@ export const AppDataSource = new DataSource({
     RestaurantCard,
     RestaurantCardMovement,
     SaasTenantLicense,
+    AuditLogEntry,
+    PdfArchiveEntry,
   ],
 });

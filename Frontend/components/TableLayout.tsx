@@ -19,12 +19,6 @@ import {
 import { usePOS } from "../store/POSContext";
 import { notifyError } from "../utils/notify";
 import {
-  getRoomDisplayMode,
-  setRoomDisplayMode as persistRoomDisplayMode,
-  subscribeRoomDisplayMode,
-  type RoomDisplayMode,
-} from "../utils/roomDisplayPreference";
-import {
   floorRoomInnerClassName,
   floorRoomOuterClassName,
   floorVignetteClassName,
@@ -257,7 +251,7 @@ const TableLayout: React.FC<TableLayoutProps> = ({
   onSelectTable,
   enableReservations = true,
 }) => {
-  const { orders, settings, zones, tables, currentUser, logout, updateTable, printTicket, printOrderClientReceiptProvisional, getTicketsByOrder, refreshOrders } =
+  const { orders, settings, zones, tables, currentUser, logout, updateTable, printTicket, printOrderClientReceiptProvisional, getTicketsByOrder, refreshOrders, updateSettings } =
     usePOS();
   const [previewOrder, setPreviewOrder] = useState<Order | null>(null);
   const [previewTickets, setPreviewTickets] = useState<any[]>([]);
@@ -272,13 +266,16 @@ const TableLayout: React.FC<TableLayoutProps> = ({
   const [reservationError, setReservationError] = useState("");
   const [reservationSaving, setReservationSaving] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const [roomDisplayMode, setRoomDisplayMode] = useState<RoomDisplayMode>(() =>
-    getRoomDisplayMode(),
+  const [roomDisplayMode, setRoomDisplayMode] = useState<"plan" | "simple">(
+    () => {
+      const initial = (settings as any)?.roomDisplayMode;
+      return initial === "simple" || initial === "plan" ? initial : "plan";
+    },
   );
-
   useEffect(() => {
-    return subscribeRoomDisplayMode((mode) => setRoomDisplayMode(mode));
-  }, []);
+    const dbMode = (settings as any)?.roomDisplayMode;
+    if (dbMode === "simple" || dbMode === "plan") setRoomDisplayMode(dbMode);
+  }, [settings]);
 
   const canManageTables = useMemo(() => {
     if (!currentUser) return false;
@@ -616,7 +613,12 @@ const TableLayout: React.FC<TableLayoutProps> = ({
           >
             <button
               type="button"
-              onClick={() => persistRoomDisplayMode("simple")}
+              onClick={() => {
+                setRoomDisplayMode("simple");
+                void updateSettings({ roomDisplayMode: "simple" } as any).catch(
+                  () => undefined,
+                );
+              }}
               className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all sm:flex-initial ${
                 roomDisplayMode === "simple"
                   ? "bg-white text-indigo-700 shadow-md ring-1 ring-indigo-100"
@@ -628,7 +630,12 @@ const TableLayout: React.FC<TableLayoutProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => persistRoomDisplayMode("plan")}
+              onClick={() => {
+                setRoomDisplayMode("plan");
+                void updateSettings({ roomDisplayMode: "plan" } as any).catch(
+                  () => undefined,
+                );
+              }}
               className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all sm:flex-initial ${
                 roomDisplayMode === "plan"
                   ? "bg-white text-indigo-700 shadow-md ring-1 ring-indigo-100"

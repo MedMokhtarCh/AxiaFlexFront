@@ -16,6 +16,14 @@ const defaults = {
   email: '',
   taxId: '',
   address: '',
+  predefinedNotes: [
+    'Sans Oignon',
+    'Trés Épicé',
+    'Bien Cuit',
+    'Sans Sel',
+    'Extra Sauce',
+    'Allergie',
+  ],
   timbreValue: 1.0,
   tvaRate: 19,
   applyTvaToTicket: true,
@@ -78,6 +86,7 @@ const defaults = {
   preventSaleOnInsufficientStock: true,
   currency: 'DT',
   terminalId: '',
+  roomDisplayMode: 'plan' as const,
   ticketPrefix: 'TK-',
   ticketSequence: 0,
   invoicePrefix: 'INV-',
@@ -139,6 +148,12 @@ const normalizeClientKdsWallboardMinWidthPx = (value: any) => {
   const n = Number(value);
   if (!Number.isFinite(n)) return defaults.clientKdsWallboardMinWidthPx;
   return Math.max(800, Math.min(3840, Math.floor(n)));
+};
+
+const normalizeRoomDisplayMode = (value: any) => {
+  const raw = String(value ?? '').trim().toLowerCase();
+  if (raw === 'simple' || raw === 'plan') return raw;
+  return defaults.roomDisplayMode;
 };
 
 const normalizeTicketLayout = (raw: any) => {
@@ -246,6 +261,19 @@ function normalizePaymentEnabledMethods(raw: any) {
   return uniq.length > 0 ? uniq : [...defaults.paymentEnabledMethods];
 }
 
+function normalizePredefinedNotes(raw: any) {
+  const arr = Array.isArray(raw) ? raw : [];
+  const out = Array.from(
+    new Set(
+      arr
+        .map((v: any) => String(v ?? '').trim())
+        .filter((v: string) => v.length > 0)
+        .map((v: string) => v.slice(0, 80)),
+    ),
+  );
+  return out.length > 0 ? out : [...defaults.predefinedNotes];
+}
+
 export async function getSettings() {
   const repo = AppDataSource.getRepository(RestaurantSettings);
   const existing = await repo.findOne({ where: {} as any });
@@ -270,6 +298,9 @@ export async function getSettings() {
   (base as any).paymentEnabledMethods = normalizePaymentEnabledMethods(
     (existing as any)?.paymentEnabledMethods ?? (base as any)?.paymentEnabledMethods,
   );
+  (base as any).predefinedNotes = normalizePredefinedNotes(
+    (existing as any)?.predefinedNotes ?? (base as any)?.predefinedNotes,
+  );
   (base as any).clientKdsDisplayMode = normalizeClientKdsDisplayMode(
     (existing as any)?.clientKdsDisplayMode ?? (base as any).clientKdsDisplayMode,
   );
@@ -283,14 +314,21 @@ export async function getSettings() {
       defaults.cashClosingModePreference,
   );
   (base as any).cashClosingModePreference = pref;
-  (base as any).cashClosingMode = effectiveCashClosingMode(
-    String((base as any).companyType || defaults.companyType),
-    pref,
-  );
   try {
     const saasLicense = await getTenantLicenseSnapshot();
+    if (saasLicense?.companyTypeManagedBySaas && saasLicense?.forcedCompanyType) {
+      (base as any).companyType = normalizeCompanyType(saasLicense.forcedCompanyType);
+    }
+    (base as any).cashClosingMode = effectiveCashClosingMode(
+      String((base as any).companyType || defaults.companyType),
+      pref,
+    );
     return { ...base, saasLicense };
   } catch {
+    (base as any).cashClosingMode = effectiveCashClosingMode(
+      String((base as any).companyType || defaults.companyType),
+      pref,
+    );
     return base;
   }
 }
@@ -321,7 +359,11 @@ export async function saveSettings(incomingUpdate: any) {
     ...defaults,
     ...(existing || {}),
     ...update,
-    companyType: normalizeCompanyType(update?.companyType ?? existing?.companyType ?? defaults.companyType),
+    companyType: normalizeCompanyType(
+      lic.companyTypeManagedBySaas
+        ? lic.forcedCompanyType ?? existing?.companyType ?? defaults.companyType
+        : update?.companyType ?? existing?.companyType ?? defaults.companyType,
+    ),
     timbreValue: parseNumeric(update?.timbreValue ?? existing?.timbreValue ?? defaults.timbreValue),
     tvaRate: parseNumeric(update?.tvaRate ?? existing?.tvaRate ?? defaults.tvaRate),
     applyTvaToTicket: update?.applyTvaToTicket ?? existing?.applyTvaToTicket ?? defaults.applyTvaToTicket,
@@ -339,6 +381,11 @@ export async function saveSettings(incomingUpdate: any) {
       update?.clientKdsWallboardMinWidthPx ??
         (existing as any)?.clientKdsWallboardMinWidthPx ??
         defaults.clientKdsWallboardMinWidthPx,
+    ),
+    roomDisplayMode: normalizeRoomDisplayMode(
+      update?.roomDisplayMode ??
+        (existing as any)?.roomDisplayMode ??
+        defaults.roomDisplayMode,
     ),
     clientTicketPrintCopies: Math.max(
       1,
@@ -410,6 +457,12 @@ export async function saveSettings(incomingUpdate: any) {
         ? normalizePaymentEnabledMethods(update.paymentEnabledMethods)
         : normalizePaymentEnabledMethods(
             (existing as any)?.paymentEnabledMethods ?? defaults.paymentEnabledMethods,
+          ),
+    predefinedNotes:
+      update?.predefinedNotes !== undefined
+        ? normalizePredefinedNotes(update.predefinedNotes)
+        : normalizePredefinedNotes(
+            (existing as any)?.predefinedNotes ?? defaults.predefinedNotes,
           ),
     cashClosingModePreference: normalizeCashClosingModePreference(
       update?.cashClosingModePreference ??

@@ -5,6 +5,12 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import fsp from 'fs/promises';
+import { AppDataSource } from '../data-source.js';
+import { User } from '../entity/User.js';
+import {
+  getPdfArchiveFileByRelativePath,
+  listPdfArchivesFromDb,
+} from '../services/pdfArchiveService.js';
 
 const uploadsDir = path.join(process.cwd(), 'uploads', 'logos');
 fs.mkdirSync(uploadsDir, { recursive: true });
@@ -20,6 +26,20 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
+
+async function requireAdminFromQuery(req: Request, res: Response): Promise<User | null> {
+  const userId = String((req.query as any)?.userId || '').trim();
+  if (!userId) {
+    res.status(400).json({ error: 'userId requis' });
+    return null;
+  }
+  const user = await AppDataSource.getRepository(User).findOneBy({ id: userId } as any);
+  if (!user || String(user.role || '').toUpperCase() !== 'ADMIN') {
+    res.status(403).json({ error: 'Accès réservé aux administrateurs' });
+    return null;
+  }
+  return user;
+}
 
 export async function getSettings(req: Request, res: Response) {
   try {
@@ -66,72 +86,11 @@ export const uploadLogo = [
   },
 ];
 
-const resolvePdfArchiveBaseDir = async () => {
-  const settings = await settingsService.getSettings();
-  const configured = String((settings as any)?.receiptPdfDirectory || '').trim();
-  return configured || path.join(process.cwd(), 'tmp', 'pdf-archives');
-};
-
-const isInside = (baseDir: string, targetPath: string) => {
-  const rel = path.relative(baseDir, targetPath);
-  return rel && !rel.startsWith('..') && !path.isAbsolute(rel);
-};
-
 export async function listPdfArchives(_req: Request, res: Response) {
   try {
-    const baseDir = await resolvePdfArchiveBaseDir();
-    await fsp.mkdir(baseDir, { recursive: true });
-    const categories = await fsp.readdir(baseDir, { withFileTypes: true });
-    const out: Array<{
-      category: string;
-      path: string;
-      files: Array<{ name: string; relativePath: string; size: number; updatedAt: number }>;
-    }> = [];
-
-    for (const cat of categories) {
-      if (!cat.isDirectory()) continue;
-      const catPath = path.join(baseDir, cat.name);
-      const nested = await fsp.readdir(catPath, { withFileTypes: true });
-      const files: Array<{ name: string; relativePath: string; size: number; updatedAt: number }> = [];
-
-      for (const item of nested) {
-        if (item.isDirectory()) {
-          const subPath = path.join(catPath, item.name);
-          const subFiles = await fsp.readdir(subPath, { withFileTypes: true });
-          for (const sf of subFiles) {
-            if (!sf.isFile() || !sf.name.toLowerCase().endsWith('.pdf')) continue;
-            const fp = path.join(subPath, sf.name);
-            const st = await fsp.stat(fp);
-            files.push({
-              name: sf.name,
-              relativePath: path.relative(baseDir, fp),
-              size: Number(st.size || 0),
-              updatedAt: Number(st.mtimeMs || Date.now()),
-            });
-          }
-        } else if (item.isFile() && item.name.toLowerCase().endsWith('.pdf')) {
-          const fp = path.join(catPath, item.name);
-          const st = await fsp.stat(fp);
-          files.push({
-            name: item.name,
-            relativePath: path.relative(baseDir, fp),
-            size: Number(st.size || 0),
-            updatedAt: Number(st.mtimeMs || Date.now()),
-          });
-        }
-      }
-
-      files.sort((a, b) => b.updatedAt - a.updatedAt);
-      out.push({
-        category: cat.name,
-        path: catPath,
-        files: files.slice(0, 200),
-      });
-    }
-
-    out.sort((a, b) => a.category.localeCompare(b.category));
+    const out = await listPdfArchivesFromDb();
     res.json({
-      baseDir,
+      baseDir: 'db://pdf-archives',
       categories: out,
     });
   } catch (err) {
@@ -142,18 +101,88 @@ export async function listPdfArchives(_req: Request, res: Response) {
 
 export async function downloadPdfArchiveFile(req: Request, res: Response) {
   try {
-    const baseDir = await resolvePdfArchiveBaseDir();
     const rel = String(req.query.path || '').trim();
     if (!rel) return res.status(400).json({ error: 'Missing file path' });
-    const target = path.resolve(baseDir, rel);
-    if (!isInside(baseDir, target)) {
-      return res.status(403).json({ error: 'Path is outside archive directory' });
-    }
-    const st = await fsp.stat(target);
-    if (!st.isFile()) return res.status(404).json({ error: 'File not found' });
-    res.download(target, path.basename(target));
+    const row = await getPdfArchiveFileByRelativePath(rel);
+    if (!row) return res.status(404).json({ error: 'File not found' });
+    const fileName = String((row as any).name || 'archive.pdf');
+    const content = (row as any).content as Buffer;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(content);
   } catch (err) {
     console.error('downloadPdfArchiveFile error:', err);
+    res.status(500).json({ error: (err as any)?.message || 'Server error' });
+  }
+}
+
+export async function listMigrationReports(req: Request, res: Response) {
+  try {
+    const user = await requireAdminFromQuery(req, res);
+    if (!user) return;
+    const reportsDir = path.join(process.cwd(), 'tmp', 'migration-reports');
+    await fsp.mkdir(reportsDir, { recursive: true });
+    const entries = await fsp.readdir(reportsDir, { withFileTypes: true });
+    const files = await Promise.all(
+      entries
+        .filter((e) => e.isFile() && e.name.toLowerCase().endsWith('.json'))
+        .map(async (e) => {
+          const filePath = path.join(reportsDir, e.name);
+          const st = await fsp.stat(filePath);
+          return {
+            name: e.name,
+            path: filePath,
+            size: Number(st.size || 0),
+            updatedAt: Number(st.mtimeMs || Date.now()),
+          };
+        }),
+    );
+    files.sort((a, b) => b.updatedAt - a.updatedAt);
+    res.json({
+      reportsDir,
+      reports: files.slice(0, 200),
+    });
+  } catch (err) {
+    console.error('listMigrationReports error:', err);
+    res.status(500).json({ error: (err as any)?.message || 'Server error' });
+  }
+}
+
+export async function getLatestMigrationReport(req: Request, res: Response) {
+  try {
+    const user = await requireAdminFromQuery(req, res);
+    if (!user) return;
+    const reportsDir = path.join(process.cwd(), 'tmp', 'migration-reports');
+    await fsp.mkdir(reportsDir, { recursive: true });
+    const entries = await fsp.readdir(reportsDir, { withFileTypes: true });
+    const files = await Promise.all(
+      entries
+        .filter((e) => e.isFile() && e.name.toLowerCase().endsWith('.json'))
+        .map(async (e) => {
+          const filePath = path.join(reportsDir, e.name);
+          const st = await fsp.stat(filePath);
+          return { name: e.name, filePath, updatedAt: Number(st.mtimeMs || 0) };
+        }),
+    );
+    files.sort((a, b) => b.updatedAt - a.updatedAt);
+    const latest = files[0];
+    if (!latest) {
+      return res.status(404).json({ error: 'Aucun rapport de migration trouvé' });
+    }
+    const raw = await fsp.readFile(latest.filePath, 'utf8');
+    let content: unknown = null;
+    try {
+      content = JSON.parse(raw);
+    } catch {
+      content = raw;
+    }
+    res.json({
+      reportFile: latest.name,
+      updatedAt: latest.updatedAt,
+      content,
+    });
+  } catch (err) {
+    console.error('getLatestMigrationReport error:', err);
     res.status(500).json({ error: (err as any)?.message || 'Server error' });
   }
 }

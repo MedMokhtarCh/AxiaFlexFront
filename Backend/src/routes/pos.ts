@@ -156,6 +156,8 @@ router.post('/admin/logs', auditLogController.appendAppAdminLog);
 router.post('/settings/logo', ...(settingsController as any).uploadLogo);
 router.get('/settings/pdf-archives', settingsController.listPdfArchives);
 router.get('/settings/pdf-archives/download', settingsController.downloadPdfArchiveFile);
+router.get('/settings/migration-reports', settingsController.listMigrationReports);
+router.get('/settings/migration-reports/latest', settingsController.getLatestMigrationReport);
 
 router.get('/stock/movements', stockController.listMovements);
 router.post('/stock/movements', stockController.createMovement);

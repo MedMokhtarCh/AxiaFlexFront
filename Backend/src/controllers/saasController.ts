@@ -32,10 +32,12 @@ export async function getLicense(req: Request, res: Response) {
     }
     const lic = await saas.ensureLicenseRow();
     const snapshot = await saas.getTenantLicenseSnapshot();
+    const settings = await settingsService.getSettings();
     const extras = saas.getSuperAdminLicenseExtras(lic);
     return res.json({
       ...snapshot,
       ...extras,
+      appliedCompanyType: (settings as any)?.companyType || null,
       allModuleIds: saas.ALL_SAAS_MODULE_IDS,
       updatedAt: lic.updatedAt,
     });
@@ -108,7 +110,11 @@ export async function patchLicense(req: Request, res: Response) {
       /* ne pas faire échouer la requête */
     }
     const snapshot = await saas.getTenantLicenseSnapshot();
-    return res.json(snapshot);
+    const settings = await settingsService.getSettings();
+    return res.json({
+      ...snapshot,
+      appliedCompanyType: (settings as any)?.companyType || null,
+    });
   } catch (e) {
     return res.status(500).json({ error: (e as any)?.message || 'Server error' });
   }
@@ -120,6 +126,10 @@ export async function syncLicenseExternal(req: Request, res: Response) {
       return res.status(401).json({ error: 'Session Super Admin requise.' });
     }
     const result = await saas.syncLicenseFromExternalApi();
+    const lic = await saas.ensureLicenseRow();
+    if (lic.companyTypeManagedBySaas && lic.forcedCompanyType) {
+      await settingsService.saveSettings({ companyType: lic.forcedCompanyType });
+    }
     const snapshot = await saas.getTenantLicenseSnapshot();
     try {
       await fileLog.appendAuditLine('developer', {
