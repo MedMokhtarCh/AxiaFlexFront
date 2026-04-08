@@ -459,7 +459,10 @@ const KitchenDisplay: React.FC = () => {
                     printersById,
                   );
                   const p = prepOfItem(item);
-                  const next = nextPrepStatus(p);
+                  const next =
+                    role === Role.SERVER && p === OrderStatus.READY
+                      ? OrderStatus.DELIVERED
+                      : nextPrepStatus(p);
                   const canTap =
                     canStaffActOnKdsItem(
                       item,
