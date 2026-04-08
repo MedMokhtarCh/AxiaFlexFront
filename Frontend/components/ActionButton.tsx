@@ -1,9 +1,11 @@
-import React from "react";
+import React, { useContext } from "react";
+import { POSContext } from "../store/POSContext";
 
 type Variant = "primary" | "ghost" | "danger" | "link";
 
 interface Props extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
+  showGlobalBusy?: boolean;
 }
 
 const variantClasses: Record<Variant, string> = {
@@ -19,16 +21,30 @@ const base =
 
 const ActionButton: React.FC<Props> = ({
   variant = "ghost",
+  showGlobalBusy,
   children,
   className = "",
+  disabled,
   ...rest
 }) => {
+  const pos = useContext(POSContext);
+  const isMutating = Boolean(pos?.isMutating);
+  const shouldShowGlobalBusy = showGlobalBusy ?? variant === "primary";
+  const computedDisabled = Boolean(disabled || (shouldShowGlobalBusy && isMutating));
+
   return (
     <button
       className={`${base} ${variantClasses[variant]} ${className}`}
+      disabled={computedDisabled}
       {...rest}
     >
+      {shouldShowGlobalBusy && isMutating ? (
+        <span className="inline-block h-2 w-2 rounded-full bg-current animate-pulse" />
+      ) : null}
       {children}
+      {shouldShowGlobalBusy && isMutating ? (
+        <span className="text-[11px] font-bold opacity-85">Traitement...</span>
+      ) : null}
     </button>
   );
 };

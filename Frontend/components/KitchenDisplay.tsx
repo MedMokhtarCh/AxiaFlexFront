@@ -48,11 +48,18 @@ const prepBadgeClass: Record<string, string> = {
 function computeOrderPrepStatus(items: OrderItem[]): OrderStatus {
   if (!items.length) return OrderStatus.PENDING;
   const statuses = items.map((item) => prepOfItem(item));
+  if (statuses.every((s) => s === OrderStatus.DELIVERED))
+    return OrderStatus.DELIVERED;
   if (statuses.every((s) => s === OrderStatus.READY))
+    return OrderStatus.READY;
+  if (statuses.every((s) => s === OrderStatus.READY || s === OrderStatus.DELIVERED))
     return OrderStatus.READY;
   if (
     statuses.every(
-      (s) => s === OrderStatus.PREPARING || s === OrderStatus.READY,
+      (s) =>
+        s === OrderStatus.PREPARING ||
+        s === OrderStatus.READY ||
+        s === OrderStatus.DELIVERED,
     )
   ) {
     return OrderStatus.PREPARING;
@@ -176,15 +183,22 @@ const KitchenDisplay: React.FC = () => {
     return activeOrders
       .map((order) => {
         const allItems = order.items || [];
-        const items = allItems.filter((item) =>
-          itemMatchesKdsFilter(
+        const items = allItems.filter((item) => {
+          if (
+            (role === Role.CHEF || role === Role.BARTENDER) &&
+            (prepOfItem(item) === OrderStatus.READY ||
+              prepOfItem(item) === OrderStatus.DELIVERED)
+          ) {
+            return false;
+          }
+          return itemMatchesKdsFilter(
             item,
             effectiveFilter,
             rolePostes,
             productsById,
             printersById,
-          ),
-        );
+          );
+        });
         return { order, items, allItems };
       })
       .filter((e) => e.items.length > 0);
@@ -192,6 +206,7 @@ const KitchenDisplay: React.FC = () => {
     activeOrders,
     effectiveFilter,
     rolePostes,
+    role,
     productsById,
     printersById,
   ]);
@@ -302,7 +317,10 @@ const KitchenDisplay: React.FC = () => {
       )
         return;
       const current = prepOfItem(target);
-      const next = nextPrepStatus(current);
+      const next =
+        role === Role.SERVER && current === OrderStatus.READY
+          ? OrderStatus.DELIVERED
+          : nextPrepStatus(current);
       if (!next) return;
 
       const updatedItems = allItems.map((it) => {
@@ -321,6 +339,8 @@ const KitchenDisplay: React.FC = () => {
         order.discount,
         false,
         nextOrderStatus,
+        undefined,
+        { skipConfirmation: true },
       );
     },
     [
@@ -454,6 +474,8 @@ const KitchenDisplay: React.FC = () => {
                       ? "Démarrer"
                       : p === OrderStatus.PREPARING
                         ? "Marquer prêt"
+                        : role === Role.SERVER && p === OrderStatus.READY
+                          ? "Servi"
                         : "—";
 
                   return (

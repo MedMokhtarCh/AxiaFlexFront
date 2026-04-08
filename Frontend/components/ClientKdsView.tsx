@@ -121,7 +121,8 @@ const ClientKdsView: React.FC<ClientKdsViewProps> = ({
     const list = sourceOrders.filter(
       (o) =>
         o.status !== OrderStatus.COMPLETED &&
-        o.status !== OrderStatus.CANCELLED,
+        o.status !== OrderStatus.CANCELLED &&
+        o.status !== OrderStatus.DELIVERED,
     );
     if (filter === "ALL") return list;
     return list.filter((o) => o.status === filter);

@@ -19,6 +19,7 @@ const formatAmount = (value: unknown, digits = 3) =>
 
 type ReceiptLine = {
   productId: string;
+  variantId?: string;
   quantity: number;
   unitCost: number;
   note?: string;
@@ -50,6 +51,7 @@ const PurchaseManagement: React.FC = () => {
   const [supplierEmail, setSupplierEmail] = useState("");
   const [supplierAddress, setSupplierAddress] = useState("");
   const [supplierTaxId, setSupplierTaxId] = useState("");
+  const [savingSupplier, setSavingSupplier] = useState(false);
 
   const resetSupplierForm = () => {
     setEditingSupplier(null);
@@ -78,31 +80,36 @@ const PurchaseManagement: React.FC = () => {
   };
 
   const handleSaveSupplier = async () => {
+    if (savingSupplier) return;
     const name = supplierName.trim();
     if (!name) return;
+    setSavingSupplier(true);
+    try {
+      if (editingSupplier) {
+        await updateSupplier(editingSupplier.id, {
+          name,
+          contactName: supplierContact || null,
+          phone: supplierPhone || null,
+          email: supplierEmail || null,
+          address: supplierAddress || null,
+          taxId: supplierTaxId || null,
+        });
+      } else {
+        await createSupplier({
+          name,
+          contactName: supplierContact || null,
+          phone: supplierPhone || null,
+          email: supplierEmail || null,
+          address: supplierAddress || null,
+          taxId: supplierTaxId || null,
+        });
+      }
 
-    if (editingSupplier) {
-      await updateSupplier(editingSupplier.id, {
-        name,
-        contactName: supplierContact || null,
-        phone: supplierPhone || null,
-        email: supplierEmail || null,
-        address: supplierAddress || null,
-        taxId: supplierTaxId || null,
-      });
-    } else {
-      await createSupplier({
-        name,
-        contactName: supplierContact || null,
-        phone: supplierPhone || null,
-        email: supplierEmail || null,
-        address: supplierAddress || null,
-        taxId: supplierTaxId || null,
-      });
+      setSupplierModalOpen(false);
+      resetSupplierForm();
+    } finally {
+      setSavingSupplier(false);
     }
-
-    setSupplierModalOpen(false);
-    resetSupplierForm();
   };
 
   const handleDeleteSupplier = async (supplier: Supplier) => {
@@ -125,7 +132,7 @@ const PurchaseManagement: React.FC = () => {
   );
   const [receiptNote, setReceiptNote] = useState("");
   const [receiptLines, setReceiptLines] = useState<ReceiptLine[]>([
-    { productId: "", quantity: 1, unitCost: 0 },
+    { productId: "", variantId: "", quantity: 1, unitCost: 0 },
   ]);
   const [savingReceipt, setSavingReceipt] = useState(false);
 
@@ -142,7 +149,7 @@ const PurchaseManagement: React.FC = () => {
   const handleAddLine = () => {
     setReceiptLines((prev) => [
       ...prev,
-      { productId: "", quantity: 1, unitCost: 0 },
+      { productId: "", variantId: "", quantity: 1, unitCost: 0 },
     ]);
   };
 
@@ -171,6 +178,7 @@ const PurchaseManagement: React.FC = () => {
         note: receiptNote || undefined,
         lines: validLines.map((l) => ({
           productId: l.productId,
+          variantId: l.variantId || undefined,
           quantity: l.quantity,
           movementType: "IN",
           note: l.note,
@@ -180,7 +188,7 @@ const PurchaseManagement: React.FC = () => {
 
       setReceiptInvoiceNumber("");
       setReceiptNote("");
-      setReceiptLines([{ productId: "", quantity: 1, unitCost: 0 }]);
+      setReceiptLines([{ productId: "", variantId: "", quantity: 1, unitCost: 0 }]);
     } finally {
       setSavingReceipt(false);
     }
@@ -355,7 +363,7 @@ const PurchaseManagement: React.FC = () => {
   );
 
   const renderReceiptTab = () => (
-    <div className="space-y-4">
+    <div className="relative space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
@@ -425,6 +433,7 @@ const PurchaseManagement: React.FC = () => {
           <button
             type="button"
             onClick={handleAddLine}
+            disabled={savingReceipt}
             className="px-3 py-1.5 rounded-2xl bg-slate-900 text-white text-xs font-semibold active:scale-[0.97]"
           >
             + Ajouter une ligne
@@ -445,9 +454,19 @@ const PurchaseManagement: React.FC = () => {
                   value={line.productId}
                   onChange={(e) => {
                     const value = e.target.value;
+                                const product = productById.get(value);
+                                const hasVariants =
+                                  Array.isArray(product?.variants) &&
+                                  product.variants.length > 0;
                     setReceiptLines((prev) =>
                       prev.map((l, i) =>
-                        i === idx ? { ...l, productId: value } : l,
+                                    i === idx
+                                      ? {
+                                          ...l,
+                                          productId: value,
+                                          variantId: hasVariants ? "" : "",
+                                        }
+                                      : l,
                       ),
                     );
                   }}
@@ -460,6 +479,60 @@ const PurchaseManagement: React.FC = () => {
                     </option>
                   ))}
                 </select>
+                                {line.productId ? (
+                                  <div className="mt-2 space-y-1">
+                                    {(() => {
+                                      const product = productById.get(line.productId);
+                                      const variants = Array.isArray(product?.variants)
+                                        ? product.variants
+                                        : [];
+                                      if (!variants.length) {
+                                        return (
+                                          <p className="text-[11px] text-slate-500">
+                                            Stock actuel article:{" "}
+                                            <span className="font-bold text-slate-700">
+                                              {Number(product?.stock || 0)}
+                                            </span>
+                                          </p>
+                                        );
+                                      }
+                                      return (
+                                        <>
+                                          <select
+                                            value={line.variantId || ""}
+                                            onChange={(e) => {
+                                              const value = e.target.value;
+                                              setReceiptLines((prev) =>
+                                                prev.map((l, i) =>
+                                                  i === idx
+                                                    ? { ...l, variantId: value }
+                                                    : l,
+                                                ),
+                                              );
+                                            }}
+                                            className="w-full px-3 py-2 rounded-2xl border border-slate-200 text-xs outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                          >
+                                            <option value="">Article principal (sans variante)</option>
+                                            {variants.map((v: any) => (
+                                              <option key={v.id} value={v.id}>
+                                                {v.name} (stock: {Number(v.stock || 0)})
+                                              </option>
+                                            ))}
+                                          </select>
+                                          <p className="text-[11px] text-slate-500">
+                                            Stock variantes:{" "}
+                                            {variants
+                                              .map(
+                                                (v: any) =>
+                                                  `${v.name}: ${Number(v.stock || 0)}`,
+                                              )
+                                              .join(" · ")}
+                                          </p>
+                                        </>
+                                      );
+                                    })()}
+                                  </div>
+                                ) : null}
               </div>
               <div className="md:col-span-2">
                 <label className="block text-[11px] font-semibold text-slate-600 mb-1">
@@ -511,6 +584,7 @@ const PurchaseManagement: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => handleRemoveLine(idx)}
+                  disabled={savingReceipt}
                   className="w-8 h-8 rounded-full flex items-center justify-center text-rose-500 hover:bg-rose-50"
                 >
                   <Trash2 size={16} />
@@ -563,6 +637,9 @@ const PurchaseManagement: React.FC = () => {
           </button>
         </div>
       </div>
+      {savingReceipt ? (
+        <div className="absolute inset-0 z-10 bg-white/55 backdrop-blur-[1px] pointer-events-auto rounded-2xl" />
+      ) : null}
     </div>
   );
 
@@ -598,9 +675,11 @@ const PurchaseManagement: React.FC = () => {
               </h3>
               <button
                 onClick={() => {
+                  if (savingSupplier) return;
                   setSupplierModalOpen(false);
                   resetSupplierForm();
                 }}
+                disabled={savingSupplier}
                 className="app-modal-close"
               >
                 <X size={20} />
@@ -687,19 +766,21 @@ const PurchaseManagement: React.FC = () => {
             <div className="app-modal-footer px-5 py-4">
               <button
                 onClick={() => {
+                  if (savingSupplier) return;
                   setSupplierModalOpen(false);
                   resetSupplierForm();
                 }}
-                className="app-modal-btn app-modal-btn-secondary"
+                disabled={savingSupplier}
+                className="app-modal-btn app-modal-btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Annuler
               </button>
               <button
                 onClick={handleSaveSupplier}
-                disabled={!supplierName.trim()}
+                disabled={!supplierName.trim() || savingSupplier}
                 className="app-modal-btn app-modal-btn-primary disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Enregistrer
+                {savingSupplier ? "Enregistrement..." : "Enregistrer"}
               </button>
             </div>
           </div>

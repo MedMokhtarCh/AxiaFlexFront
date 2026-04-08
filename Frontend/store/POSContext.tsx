@@ -1796,6 +1796,7 @@ interface POSContextType {
   activeOrder: Order | null;
   paymentRequests: PaymentRequest[];
   loading: boolean;
+  isMutating: boolean;
   isOffline: boolean;
   getActiveShift: (userId: string) => Promise<Shift | null>;
   getLatestOpenShift: () => Promise<Shift | null>;
@@ -1838,6 +1839,9 @@ interface POSContextType {
       timbre?: number;
       paymentMethod?: PaymentMethod;
       clientDisplayName?: string | null;
+    },
+    options?: {
+      skipConfirmation?: boolean;
     },
   ) => Promise<void>;
   addOrderPayment: (
@@ -2141,6 +2145,7 @@ interface POSContextType {
     note?: string;
     lines: {
       productId: string;
+      variantId?: string | null;
       quantity: number;
       movementType?: "IN" | "OUT";
       note?: string;
@@ -2160,6 +2165,7 @@ interface POSContextType {
       documentDate?: number | null;
       lines: {
         productId: string;
+        variantId?: string | null;
         quantity: number;
         movementType?: "IN" | "OUT";
         note?: string;
@@ -2231,6 +2237,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
   const [paymentRequests, setPaymentRequests] = useState<PaymentRequest[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pendingMutationCount, setPendingMutationCount] = useState(0);
   const [isOffline, setIsOffline] = useState(false);
   const confirmResolverRef = useRef<((ok: boolean) => void) | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -2395,79 +2402,115 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
   });
 
   const useSimulatedBackend = USE_SIMULATED_BACKEND;
+  const pendingMutationRequestsRef = useRef<Map<string, Promise<any>>>(
+    new Map(),
+  );
 
   const apiFetch = useCallback(
     async (path: string, options?: any) => {
-      // If using simulated backend, skip real API entirely
-      if (useSimulatedBackend) {
-        setIsOffline(true);
-        return await SimulatedBackend.handleRequest(path, options);
+      const method = String(options?.method || "GET").toUpperCase();
+      const isMutation = method !== "GET" && method !== "HEAD";
+      const bodyKey =
+        typeof options?.body === "string"
+          ? options.body
+          : JSON.stringify(options?.body ?? "");
+      const requestKey = isMutation ? `${method}:${path}:${bodyKey}` : null;
+
+      if (requestKey) {
+        const pending = pendingMutationRequestsRef.current.get(requestKey);
+        if (pending) return await pending;
       }
 
-      try {
-        const method = String(options?.method || "GET").toUpperCase();
-        let fetchOptions = options || {};
-        if (
-          currentUser &&
-          method !== "GET" &&
-          method !== "HEAD" &&
-          options?.body &&
-          typeof options.body === "string"
-        ) {
-          try {
-            const obj = JSON.parse(options.body) as Record<string, unknown>;
-            if (obj && typeof obj === "object" && !Array.isArray(obj)) {
-              if (obj.auditUserId == null && obj.auditUserName == null) {
-                obj.auditUserId = currentUser.id;
-                obj.auditUserName = currentUser.name;
-                fetchOptions = { ...options, body: JSON.stringify(obj) };
-              }
-            }
-          } catch {
-            /* corps non JSON */
-          }
-        }
-        const response = await fetch(`${API_BASE_URL}${path}`, {
-          ...(fetchOptions || {}),
-          ...(method === "GET" ? { cache: "no-store" as RequestCache } : {}),
-        });
-        if (!response.ok) {
-          let errorMessage = `API Error (${response.status})`;
-          try {
-            const contentType = response.headers.get("content-type") || "";
-            if (contentType.includes("application/json")) {
-              const payload = await response.json();
-              if (payload?.error) errorMessage = String(payload.error);
-            } else {
-              const text = await response.text();
-              if (text) errorMessage = text;
-            }
-          } catch {
-            // keep default message
-          }
-          throw new Error(errorMessage);
-        }
-        setIsOffline(false);
-        const contentType = response.headers.get("content-type") || "";
-        if (!contentType.includes("application/json")) {
-          const text = await response.text().catch(() => "");
-          if (text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html")) {
-            throw new Error(
-              "Réponse HTML reçue au lieu de JSON. Configurez VITE_API_URL vers l'URL backend (ex: https://api.example.com).",
-            );
-          }
-          throw new Error(
-            `Réponse API non JSON (${response.status}). Vérifiez VITE_API_URL et les routes backend.`,
-          );
-        }
-        return await response.json();
-      } catch (e) {
-        setIsOffline(true);
-        // If configured to use simulated backend, fallback; otherwise propagate error
+      const requestPromise = (async () => {
+        // If using simulated backend, skip real API entirely
         if (useSimulatedBackend) {
+          setIsOffline(true);
           return await SimulatedBackend.handleRequest(path, options);
         }
-        throw e;
+
+        try {
+          let fetchOptions = options || {};
+          if (
+            currentUser &&
+            method !== "GET" &&
+            method !== "HEAD" &&
+            options?.body &&
+            typeof options.body === "string"
+          ) {
+            try {
+              const obj = JSON.parse(options.body) as Record<string, unknown>;
+              if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+                if (obj.auditUserId == null && obj.auditUserName == null) {
+                  obj.auditUserId = currentUser.id;
+                  obj.auditUserName = currentUser.name;
+                  fetchOptions = { ...options, body: JSON.stringify(obj) };
+                }
+              }
+            } catch {
+              /* corps non JSON */
+            }
+          }
+          const response = await fetch(`${API_BASE_URL}${path}`, {
+            ...(fetchOptions || {}),
+            ...(method === "GET" ? { cache: "no-store" as RequestCache } : {}),
+          });
+          if (!response.ok) {
+            let errorMessage = `API Error (${response.status})`;
+            try {
+              const contentType = response.headers.get("content-type") || "";
+              if (contentType.includes("application/json")) {
+                const payload = await response.json();
+                if (payload?.error) errorMessage = String(payload.error);
+              } else {
+                const text = await response.text();
+                if (text) errorMessage = text;
+              }
+            } catch {
+              // keep default message
+            }
+            throw new Error(errorMessage);
+          }
+          setIsOffline(false);
+          const contentType = response.headers.get("content-type") || "";
+          if (!contentType.includes("application/json")) {
+            const text = await response.text().catch(() => "");
+            if (
+              text.trim().startsWith("<!DOCTYPE") ||
+              text.trim().startsWith("<html")
+            ) {
+              throw new Error(
+                "Réponse HTML reçue au lieu de JSON. Configurez VITE_API_URL vers l'URL backend (ex: https://api.example.com).",
+              );
+            }
+            throw new Error(
+              `Réponse API non JSON (${response.status}). Vérifiez VITE_API_URL et les routes backend.`,
+            );
+          }
+          return await response.json();
+        } catch (e) {
+          setIsOffline(true);
+          // If configured to use simulated backend, fallback; otherwise propagate error
+          if (useSimulatedBackend) {
+            return await SimulatedBackend.handleRequest(path, options);
+          }
+          throw e;
+        }
+      })();
+
+      if (requestKey) {
+        setPendingMutationCount((prev) => prev + 1);
+        pendingMutationRequestsRef.current.set(requestKey, requestPromise);
+      }
+      try {
+        return await requestPromise;
+      } finally {
+        if (
+          requestKey &&
+          pendingMutationRequestsRef.current.get(requestKey) === requestPromise
+        ) {
+          pendingMutationRequestsRef.current.delete(requestKey);
+          setPendingMutationCount((prev) => Math.max(0, prev - 1));
+        }
       }
     },
     [useSimulatedBackend, currentUser],
@@ -2479,6 +2522,15 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
   ): Promise<ApiResponseMap[Path]> {
     return (await apiFetch(String(path), options)) as ApiResponseMap[Path];
   }
+
+  useEffect(() => {
+    const className = "pos-mutating";
+    if (pendingMutationCount > 0) document.body.classList.add(className);
+    else document.body.classList.remove(className);
+    return () => {
+      document.body.classList.remove(className);
+    };
+  }, [pendingMutationCount]);
 
   function buildPath(
     template: string,
@@ -2793,8 +2845,13 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
       paymentMethod?: PaymentMethod;
       clientDisplayName?: string | null;
     },
+    options?: {
+      skipConfirmation?: boolean;
+    },
   ) => {
-    await requireUserConfirmation("Modifier la commande");
+    if (!options?.skipConfirmation) {
+      await requireUserConfirmation("Modifier la commande");
+    }
     const existingOrder = orders.find((o) => o.id === orderId);
     const nextItems = Array.isArray(items) ? items : [];
     if (Number(discount || 0) > 0) {
@@ -3883,6 +3940,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
     note?: string;
     lines: {
       productId: string;
+      variantId?: string | null;
       quantity: number;
       movementType?: "IN" | "OUT";
       note?: string;
@@ -3932,6 +3990,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
       documentDate?: number | null;
       lines: {
         productId: string;
+        variantId?: string | null;
         quantity: number;
         movementType?: "IN" | "OUT";
         note?: string;
@@ -4898,6 +4957,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
         activeOrder,
         paymentRequests,
         loading,
+        isMutating: pendingMutationCount > 0,
         isOffline,
         getActiveShift,
         getLatestOpenShift,
@@ -5017,6 +5077,11 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
       }}
     >
       {children}
+      {pendingMutationCount > 0 && (
+        <div className="fixed top-3 right-3 z-[205] px-3 py-2 rounded-xl border border-indigo-200 bg-white/95 shadow text-[11px] font-black text-indigo-700">
+          Traitement en cours...
+        </div>
+      )}
       {confirmDialog.open && (
         <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white shadow-2xl overflow-hidden">

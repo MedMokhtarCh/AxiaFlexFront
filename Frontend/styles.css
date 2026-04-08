@@ -252,6 +252,13 @@ body {
   background: #4338ca;
 }
 
+/* Global mutation guard for primary modal actions */
+body.pos-mutating .app-modal-btn-primary:not(:disabled) {
+  pointer-events: none;
+  opacity: 0.7;
+  cursor: wait;
+}
+
 .app-modal-btn-danger {
   border: 1px solid #fda4af;
   background: #fff1f2;

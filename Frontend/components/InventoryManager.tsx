@@ -171,6 +171,7 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ initialView }) => {
     string | null
   >(null);
   const [stockReloadToken, setStockReloadToken] = useState(0);
+  const [savingStockDocument, setSavingStockDocument] = useState(false);
   const [stockForm, setStockForm] = useState({
     type: "ENTRY" as "ENTRY" | "OUT" | "TRANSFER" | "INVENTORY",
     date: new Date().toISOString().slice(0, 10),
@@ -178,6 +179,7 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ initialView }) => {
     lines: [
       {
         productId: "",
+        variantId: "",
         quantity: 1,
         lineNote: "",
       },
@@ -193,6 +195,7 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ initialView }) => {
       lines: [
         {
           productId: "",
+          variantId: "",
           quantity: 1,
           lineNote: "",
         },
@@ -212,6 +215,7 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ initialView }) => {
       note: String(doc.note || ""),
       lines: (Array.isArray(doc.lines) ? doc.lines : []).map((line: any) => ({
         productId: String(line.productId || ""),
+        variantId: String(line.variantId || ""),
         quantity: Number(line.quantity || 0),
         lineNote: String(line.note || ""),
       })),
@@ -221,6 +225,7 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ initialView }) => {
   };
 
   const handleSaveStockDocument = async () => {
+    if (savingStockDocument) return;
     const cleanedLines = stockForm.lines.filter(
       (l) => l.productId && l.quantity > 0,
     );
@@ -235,6 +240,7 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ initialView }) => {
         : "OUT";
 
     try {
+      setSavingStockDocument(true);
       const payload = {
         type: stockForm.type,
         note: stockForm.note || undefined,
@@ -243,6 +249,7 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ initialView }) => {
           : undefined,
         lines: cleanedLines.map((l) => ({
           productId: l.productId,
+          variantId: l.variantId || undefined,
           quantity: l.quantity,
           movementType,
           note: l.lineNote || undefined,
@@ -260,6 +267,8 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ initialView }) => {
       setStockReloadToken((prev) => prev + 1);
     } catch (error) {
       showToast("Erreur lors de la création du document", "error");
+    } finally {
+      setSavingStockDocument(false);
     }
   };
 
@@ -290,7 +299,7 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ initialView }) => {
 
   const renderStockModal = () => (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-hidden flex flex-col">
+      <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b bg-linear-to-r from-indigo-50 to-white">
           <div>
             <h3 className="text-xl md:text-2xl font-bold text-slate-800">
@@ -303,7 +312,11 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ initialView }) => {
             </p>
           </div>
           <button
-            onClick={() => setShowStockModal(false)}
+            onClick={() => {
+              if (savingStockDocument) return;
+              setShowStockModal(false);
+            }}
+            disabled={savingStockDocument}
             className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center hover:bg-slate-100 transition"
           >
             <X size={20} />
@@ -436,6 +449,7 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ initialView }) => {
                         ...stockForm.lines,
                         {
                           productId: "",
+                          variantId: "",
                           quantity: 1,
                           lineNote: "",
                         },
@@ -465,10 +479,20 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ initialView }) => {
                             value={line.productId}
                             onChange={(e) => {
                               const value = e.target.value;
+                              const selectedProduct = productsById.get(value);
+                              const hasVariants =
+                                Array.isArray(selectedProduct?.variants) &&
+                                selectedProduct.variants.length > 0;
                               setStockForm({
                                 ...stockForm,
                                 lines: stockForm.lines.map((l, i) =>
-                                  i === idx ? { ...l, productId: value } : l,
+                                  i === idx
+                                    ? {
+                                        ...l,
+                                        productId: value,
+                                        variantId: hasVariants ? "" : "",
+                                      }
+                                    : l,
                                 ),
                               });
                             }}
@@ -481,6 +505,61 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ initialView }) => {
                               </option>
                             ))}
                           </select>
+                          {line.productId ? (
+                            <div className="mt-2 space-y-1">
+                              {(() => {
+                                const product = productsById.get(line.productId);
+                                const variants = Array.isArray(product?.variants)
+                                  ? product.variants
+                                  : [];
+                                if (!variants.length) {
+                                  return (
+                                    <p className="text-[11px] text-slate-500">
+                                      Stock actuel article:{" "}
+                                      <span className="font-bold text-slate-700">
+                                        {Number(product?.stock || 0)}
+                                      </span>
+                                    </p>
+                                  );
+                                }
+                                return (
+                                  <>
+                                    <select
+                                      value={line.variantId || ""}
+                                      onChange={(e) => {
+                                        const value = e.target.value;
+                                        setStockForm({
+                                          ...stockForm,
+                                          lines: stockForm.lines.map((l, i) =>
+                                            i === idx
+                                              ? { ...l, variantId: value }
+                                              : l,
+                                          ),
+                                        });
+                                      }}
+                                      className="w-full px-3 py-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-xs"
+                                    >
+                                      <option value="">Article principal (sans variante)</option>
+                                      {variants.map((v: any) => (
+                                        <option key={v.id} value={v.id}>
+                                          {v.name} (stock: {Number(v.stock || 0)})
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <p className="text-[11px] text-slate-500">
+                                      Stock variantes:{" "}
+                                      {variants
+                                        .map(
+                                          (v: any) =>
+                                            `${v.name}: ${Number(v.stock || 0)}`,
+                                        )
+                                        .join(" · ")}
+                                    </p>
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          ) : null}
                         </td>
                         <td className="px-3 py-2">
                           <input
@@ -585,6 +664,17 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ initialView }) => {
                           <p className="text-xs font-black text-slate-700">
                             {productsById.get(l.productId)?.name || l.productId}
                           </p>
+                          <p className="text-[10px] text-slate-500">
+                            {l.variantId
+                              ? `Variante: ${
+                                  (productsById
+                                    .get(l.productId)
+                                    ?.variants || []
+                                  ).find((v: any) => v.id === l.variantId)?.name ||
+                                  l.variantId
+                                }`
+                              : "Sans variante"}
+                          </p>
                           <p className="text-[10px] text-slate-500">{l.lineNote || "-"}</p>
                         </div>
                         <span className="text-sm font-black text-indigo-700">
@@ -610,19 +700,31 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ initialView }) => {
           </div>
           <div className="flex gap-3">
           <button
-            onClick={() => setShowStockModal(false)}
-            className="px-5 py-2.5 rounded-xl font-semibold text-slate-600 hover:bg-slate-200 active:scale-[0.98] transition"
+            onClick={() => {
+              if (savingStockDocument) return;
+              setShowStockModal(false);
+            }}
+            disabled={savingStockDocument}
+            className="px-5 py-2.5 rounded-xl font-semibold text-slate-600 hover:bg-slate-200 active:scale-[0.98] transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Annuler
           </button>
           <button
             onClick={handleSaveStockDocument}
-            className="px-5 py-2.5 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-700 active:scale-[0.98] transition shadow-lg shadow-indigo-200"
+            disabled={savingStockDocument}
+            className="px-5 py-2.5 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-700 active:scale-[0.98] transition shadow-lg shadow-indigo-200 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {editingStockDocumentId ? "Enregistrer les modifications" : "Confirmer le document"}
+            {savingStockDocument
+              ? "Enregistrement..."
+              : editingStockDocumentId
+                ? "Enregistrer les modifications"
+                : "Confirmer le document"}
           </button>
           </div>
         </div>
+        {savingStockDocument ? (
+          <div className="absolute inset-0 z-10 bg-white/55 backdrop-blur-[1px] pointer-events-auto" />
+        ) : null}
       </div>
     </div>
   );
