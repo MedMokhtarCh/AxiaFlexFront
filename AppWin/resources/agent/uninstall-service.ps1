@@ -1,9 +1,9 @@
-$ErrorActionPreference = "Stop"
-
 param(
   [Parameter(Mandatory = $false)]
   [string]$ServiceName = "AxiaFlexPrintAgent"
 )
+
+$ErrorActionPreference = "Stop"
 
 Write-Host "[appwin-agent] Suppression du service $ServiceName ..."
 

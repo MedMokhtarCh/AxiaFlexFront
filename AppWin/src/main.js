@@ -73,7 +73,136 @@ function resolvePsScript(name) {
   return findFirstExistingPath(candidates);
 }
 
-function runPowershellScript(scriptPath, args = []) {
+/** PowerShell 64 bits explicite (évite SysWOW64 si Electron est 32 bits). */
+function getPowershellExe() {
+  const root = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+  const sys32 = path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  try {
+    if (fs.existsSync(sys32)) return sys32;
+  } catch {}
+  return "powershell.exe";
+}
+
+/** Chaîne entre quotes simples PowerShell ('' pour un apostrophe). */
+function escapePsSingle(s) {
+  return String(s).replace(/'/g, "''");
+}
+
+/**
+ * Exécute un .ps1 avec élévation UAC (le process enfant d'Electron n'est souvent pas admin).
+ * flatArgs: ['-Cle', 'valeur', '-Cle2', 'valeur2', ...]
+ */
+function runPowershellScriptElevated(scriptPath, flatArgs = [], options = {}) {
+  const { streamLog = true } = options;
+  const psExe = getPowershellExe();
+  const transcriptPath = path.join(
+    os.tmpdir(),
+    `axiaflex-elevated-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.log`,
+  );
+  let inv = `& '${escapePsSingle(scriptPath)}'`;
+  for (let i = 0; i < flatArgs.length; i += 2) {
+    const key = flatArgs[i];
+    const val = flatArgs[i + 1];
+    inv += ` ${key} '${escapePsSingle(val)}'`;
+  }
+  const wrapperContent = [
+    "$ErrorActionPreference = 'Stop'",
+    `$transcript = '${escapePsSingle(transcriptPath)}'`,
+    "try {",
+    "  Start-Transcript -Path $transcript -Force | Out-Null",
+    `  ${inv}`,
+    "} catch {",
+    "  $_ | Out-File -Append -FilePath $transcript -Encoding utf8",
+    "  exit 1",
+    "} finally {",
+    "  try { Stop-Transcript } catch {}",
+    "}",
+    "exit 0",
+  ].join("\r\n");
+
+  const wrapperPath = path.join(
+    os.tmpdir(),
+    `axiaflex-wrap-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.ps1`,
+  );
+  fs.writeFileSync(wrapperPath, wrapperContent, "utf8");
+
+  const launcherContent = [
+    `$wp = '${escapePsSingle(wrapperPath)}'`,
+    `$ps = '${escapePsSingle(psExe)}'`,
+    "$p = Start-Process -FilePath $ps -Verb RunAs -ArgumentList @(",
+    "  '-NoProfile',",
+    "  '-ExecutionPolicy', 'Bypass',",
+    "  '-File', $wp",
+    ") -PassThru -Wait",
+    'Write-Output "APPWIN_EXITCODE=$($p.ExitCode)"',
+    "exit $p.ExitCode",
+  ].join("\r\n");
+
+  const launcherPath = path.join(
+    os.tmpdir(),
+    `axiaflex-launch-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.ps1`,
+  );
+  fs.writeFileSync(launcherPath, launcherContent, "utf8");
+
+  pushLog(
+    "Élévation requise : une fenêtre « Contrôle de compte d’utilisateur » (UAC) doit s’ouvrir. Acceptez pour installer le service.",
+  );
+
+  return new Promise((resolve) => {
+    const proc = spawn(psExe, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", launcherPath], {
+      windowsHide: true,
+      env: process.env,
+    });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (d) => {
+      const s = String(d || "");
+      stdout += s;
+      if (streamLog) {
+        s.split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .forEach((line) => pushLog(line));
+      }
+    });
+    proc.stderr.on("data", (d) => {
+      const s = String(d || "");
+      stderr += s;
+      if (streamLog) {
+        s.split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .forEach((line) => pushLog(`PS-ERR: ${line}`));
+      }
+    });
+    proc.on("close", (code) => {
+      try {
+        if (fs.existsSync(transcriptPath)) {
+          const logContent = fs.readFileSync(transcriptPath, "utf8");
+          logContent
+            .split(/\r?\n/)
+            .map((l) => l.trim())
+            .filter(Boolean)
+            .forEach((line) => pushLog(`[service] ${line}`));
+          fs.unlinkSync(transcriptPath);
+        }
+      } catch {}
+      try {
+        fs.unlinkSync(wrapperPath);
+      } catch {}
+      try {
+        fs.unlinkSync(launcherPath);
+      } catch {}
+      const m = stdout.match(/APPWIN_EXITCODE=(\d+)/);
+      const innerCode = m ? Number.parseInt(m[1], 10) : code;
+      const ok = innerCode === 0;
+      resolve({ ok, code: innerCode, stdout: stdout.trim(), stderr: stderr.trim() });
+    });
+  });
+}
+
+function runPowershellScript(scriptPath, args = [], options = {}) {
+  const { streamLog = false } = options;
   return new Promise((resolve) => {
     const psArgs = [
       "-NoProfile",
@@ -83,7 +212,7 @@ function runPowershellScript(scriptPath, args = []) {
       scriptPath,
       ...args,
     ];
-    const proc = spawn("powershell", psArgs, {
+    const proc = spawn(getPowershellExe(), psArgs, {
       windowsHide: true,
       cwd: path.dirname(scriptPath),
       env: process.env,
@@ -91,10 +220,24 @@ function runPowershellScript(scriptPath, args = []) {
     let stdout = "";
     let stderr = "";
     proc.stdout.on("data", (d) => {
-      stdout += String(d || "");
+      const s = String(d || "");
+      stdout += s;
+      if (streamLog) {
+        s.split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .forEach((line) => pushLog(line));
+      }
     });
     proc.stderr.on("data", (d) => {
-      stderr += String(d || "");
+      const s = String(d || "");
+      stderr += s;
+      if (streamLog) {
+        s.split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .forEach((line) => pushLog(`PS-ERR: ${line}`));
+      }
     });
     proc.on("close", (code) => {
       resolve({ ok: code === 0, code, stdout: stdout.trim(), stderr: stderr.trim() });
@@ -105,7 +248,7 @@ function runPowershellScript(scriptPath, args = []) {
 function runPowershellCommand(command) {
   return new Promise((resolve) => {
     const proc = spawn(
-      "powershell",
+      getPowershellExe(),
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
       { windowsHide: true },
     );
@@ -241,9 +384,9 @@ app.whenReady().then(() => {
     const cfg = currentConfig || loadConfig();
     const scriptPath = resolvePsScript("install-service.ps1");
     if (!scriptPath) {
-      return { ok: false, error: "install-service.ps1 introuvable dans Agent/" };
+      return { ok: false, error: "install-service.ps1 introuvable (ressources AppWin)." };
     }
-    const args = [
+    const flatArgs = [
       "-CloudApiUrl",
       String(cfg.cloudApiUrl || ""),
       "-AgentMasterToken",
@@ -257,14 +400,18 @@ app.whenReady().then(() => {
       "-ServiceName",
       "AxiaFlexPrintAgent",
     ];
-    return runPowershellScript(scriptPath, args);
+    pushLog(`Installation service (PowerShell: ${getPowershellExe()}, élévation UAC)…`);
+    return runPowershellScriptElevated(scriptPath, flatArgs, { streamLog: true });
   });
   ipcMain.handle("service:uninstall", async () => {
     const scriptPath = resolvePsScript("uninstall-service.ps1");
     if (!scriptPath) {
-      return { ok: false, error: "uninstall-service.ps1 introuvable dans Agent/" };
+      return { ok: false, error: "uninstall-service.ps1 introuvable (ressources AppWin)." };
     }
-    return runPowershellScript(scriptPath, ["-ServiceName", "AxiaFlexPrintAgent"]);
+    pushLog("Désinstallation service (élévation UAC)…");
+    return runPowershellScriptElevated(scriptPath, ["-ServiceName", "AxiaFlexPrintAgent"], {
+      streamLog: true,
+    });
   });
   ipcMain.handle("service:status", async () => {
     const out = await runPowershellCommand(
