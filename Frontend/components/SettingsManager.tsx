@@ -19,6 +19,7 @@ import {
   RestaurantVoucher,
   RestaurantCard,
   RestaurantCardMovement,
+  TerminalNodeInfo,
   USER_CLAIM_OPTIONS,
 } from "../types";
 import RestaurantFloorPlanEditor, {
@@ -229,6 +230,8 @@ const SettingsManager: React.FC = () => {
     addPrinter,
     deletePrinter,
     getDetectedPrinters,
+    getTerminalNodes,
+    bindPrinterTerminal,
     settings,
     updateSettings,
     zones,
@@ -315,6 +318,10 @@ const SettingsManager: React.FC = () => {
     [],
   );
   const [selectedDetected, setSelectedDetected] = useState<string>("");
+  const [terminalNodes, setTerminalNodes] = useState<TerminalNodeInfo[]>([]);
+  const [bindingDrafts, setBindingDrafts] = useState<
+    Record<string, { terminalNodeId: string; terminalPrinterLocalId: string }>
+  >({});
 
   const guessBonProfileFromName = (name: string): "kitchen" | "bar" => {
     const n = name.toLowerCase();
@@ -327,6 +334,32 @@ const SettingsManager: React.FC = () => {
       return "bar";
     return "kitchen";
   };
+
+  useEffect(() => {
+    if (activeTab !== "hardware") return;
+    const uid = String(currentUser?.id || "").trim();
+    if (!uid) return;
+    void getTerminalNodes(uid)
+      .then((res) => {
+        const terminals = Array.isArray(res?.terminals) ? res.terminals : [];
+        setTerminalNodes(terminals);
+        setBindingDrafts((prev) => {
+          const next = { ...prev };
+          for (const p of printers) {
+            if (!next[p.id]) {
+              next[p.id] = {
+                terminalNodeId: String((p as any).terminalNodeId || ""),
+                terminalPrinterLocalId: String(
+                  (p as any).terminalPrinterLocalId || "",
+                ),
+              };
+            }
+          }
+          return next;
+        });
+      })
+      .catch(() => setTerminalNodes([]));
+  }, [activeTab, currentUser?.id, getTerminalNodes, printers]);
 
   // Zones & Tables States
   const [newZoneName, setNewZoneName] = useState("");
@@ -4139,6 +4172,16 @@ const SettingsManager: React.FC = () => {
                                   : "style cuisine"
                               }`}
                         </p>
+                        <p className="text-[10px] text-slate-500 truncate">
+                          Terminal agent:{" "}
+                          {String((p as any).terminalNodeId || "").trim()
+                            ? (terminalNodes.find(
+                                (t) =>
+                                  t.id ===
+                                  String((p as any).terminalNodeId || "").trim(),
+                              )?.alias || "lié")
+                            : "non lié (mode local)"}
+                        </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
@@ -4161,6 +4204,100 @@ const SettingsManager: React.FC = () => {
                     </div>
                   </div>
                 ))}
+                <div className="rounded-2xl border border-slate-100 p-4 bg-white">
+                  <p className="text-xs font-black uppercase tracking-widest text-slate-500 mb-3">
+                    Liaisons Cloud - Terminaux agents
+                  </p>
+                  <div className="space-y-3">
+                    {printers.map((p) => {
+                      const draft = bindingDrafts[p.id] || {
+                        terminalNodeId: String((p as any).terminalNodeId || ""),
+                        terminalPrinterLocalId: String(
+                          (p as any).terminalPrinterLocalId || "",
+                        ),
+                      };
+                      const node = terminalNodes.find(
+                        (t) => t.id === draft.terminalNodeId,
+                      );
+                      const availablePrinters = Array.isArray(node?.printers)
+                        ? node!.printers
+                        : [];
+                      return (
+                        <div
+                          key={`bind-${p.id}`}
+                          className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center"
+                        >
+                          <p className="md:col-span-3 text-xs font-bold text-slate-700 truncate">
+                            {p.name}
+                          </p>
+                          <select
+                            value={draft.terminalNodeId}
+                            onChange={(e) =>
+                              setBindingDrafts((prev) => ({
+                                ...prev,
+                                [p.id]: {
+                                  terminalNodeId: e.target.value,
+                                  terminalPrinterLocalId: "",
+                                },
+                              }))
+                            }
+                            className="md:col-span-3 px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold"
+                          >
+                            <option value="">Mode local</option>
+                            {terminalNodes.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.alias} {t.online ? "• online" : "• offline"}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            value={draft.terminalPrinterLocalId}
+                            disabled={!draft.terminalNodeId}
+                            onChange={(e) =>
+                              setBindingDrafts((prev) => ({
+                                ...prev,
+                                [p.id]: {
+                                  ...draft,
+                                  terminalPrinterLocalId: e.target.value,
+                                },
+                              }))
+                            }
+                            className="md:col-span-4 px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold disabled:opacity-50"
+                          >
+                            <option value="">Imprimante locale agent</option>
+                            {availablePrinters.map((lp) => (
+                              <option key={lp.id} value={lp.printerLocalId}>
+                                {lp.name} ({lp.transport})
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await bindPrinterTerminal({
+                                  userId: String(currentUser?.id || ""),
+                                  printerId: p.id,
+                                  terminalNodeId: draft.terminalNodeId || null,
+                                  terminalPrinterLocalId:
+                                    draft.terminalPrinterLocalId || null,
+                                });
+                                notifySuccess("Liaison imprimante enregistrée.");
+                              } catch (e: any) {
+                                notifyError(
+                                  e?.message || "Impossible d'enregistrer la liaison.",
+                                );
+                              }
+                            }}
+                            className="md:col-span-2 px-3 py-2 rounded-xl bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest"
+                          >
+                            Lier
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

@@ -54,6 +54,7 @@ import {
   RestaurantCard,
   RestaurantCardMovement,
   Warehouse,
+  TerminalNodeInfo,
 } from "../types";
 import { postPartialPayment } from "../api/api";
 import { normalizeOrderFromApi } from "../utils/normalizeOrderFromApi";
@@ -2128,6 +2129,16 @@ interface POSContextType {
   ) => Promise<void>;
   deletePrinter: (id: string) => Promise<void>;
   getDetectedPrinters: () => Promise<any[]>;
+  getTerminalNodes: (userId: string) => Promise<{
+    terminals: TerminalNodeInfo[];
+    bindings: Printer[];
+  }>;
+  bindPrinterTerminal: (params: {
+    userId: string;
+    printerId: string;
+    terminalNodeId?: string | null;
+    terminalPrinterLocalId?: string | null;
+  }) => Promise<Printer>;
   printProductionTest: (opts: {
     station?: "KITCHEN" | "BAR";
     printerId?: string;
@@ -4043,6 +4054,39 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
   const getDetectedPrinters = async () => {
     return await apiFetchTyped("/pos/printers/detected");
   };
+  const getTerminalNodes = async (userId: string) => {
+    const uid = String(userId || "").trim();
+    return (await apiFetch(
+      `/pos/terminals?userId=${encodeURIComponent(uid)}`,
+    )) as {
+      terminals: TerminalNodeInfo[];
+      bindings: Printer[];
+    };
+  };
+  const bindPrinterTerminal = async (params: {
+    userId: string;
+    printerId: string;
+    terminalNodeId?: string | null;
+    terminalPrinterLocalId?: string | null;
+  }) => {
+    const printerId = String(params.printerId || "").trim();
+    if (!printerId) throw new Error("printerId requis");
+    const saved = (await apiFetchTypedPath(
+      "/pos/printers/:id/bind-terminal" as any,
+      { id: printerId },
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: params.userId,
+          terminalNodeId: params.terminalNodeId || null,
+          terminalPrinterLocalId: params.terminalPrinterLocalId || null,
+        }),
+      },
+    )) as Printer;
+    setPrinters((prev) => prev.map((p) => (p.id === saved.id ? saved : p)));
+    return saved;
+  };
   const updateSettings = async (newSettings: Partial<AppSettings>) => {
     await requireUserConfirmation("Modifier les paramètres");
     requireClaim(
@@ -5036,6 +5080,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
         addPrinter,
         deletePrinter,
         getDetectedPrinters,
+        getTerminalNodes,
+        bindPrinterTerminal,
         printProductionTest,
         addStockMovement,
         updateStockMovement,

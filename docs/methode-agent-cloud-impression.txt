@@ -1,0 +1,72 @@
+METHODE: BACKEND CLOUD + MATERIEL LOCAL (AGENT IMPRESSION)
+===========================================================
+
+Objectif
+--------
+Permettre a un backend cloud de gerer des imprimantes connectees localement
+(USB/reseau) sur plusieurs postes (caisses, PC cuisine, etc.).
+
+Principe
+--------
+1) Le backend cloud ne voit pas le materiel local directement.
+2) Un agent local est installe sur chaque poste qui possede des imprimantes.
+3) L'agent:
+   - s'enregistre sur le cloud avec une cle master,
+   - envoie regulierement son etat (heartbeat),
+   - remonte la liste des imprimantes installees localement,
+   - recupere des jobs d'impression,
+   - execute l'impression localement et renvoie le resultat.
+
+Parametrage backend cloud
+-------------------------
+- Variable obligatoire:
+  AGENT_MASTER_TOKEN=<cle_secrete_longue>
+
+Cette cle sert a autoriser l'enregistrement initial des agents.
+
+Parametrage agent local (par poste)
+-----------------------------------
+Fichiers disponibles dans le dossier Agent:
+- setup-agent-interactive.cmd (recommande)
+- setup-agent-interactive.ps1
+- install-service.ps1
+- uninstall-service.ps1
+
+Valeurs demandees par le setup:
+- Cloud API URL: URL publique du backend (ex: https://axiaflex-backend.onrender.com)
+- AGENT_MASTER_TOKEN: meme valeur que dans le backend
+- Alias terminal: identifiant lisible (ex: TERMINAL-1, TERMINAL-2, KITCHEN-PC-1)
+- Nom du site: libelle d'etablissement (ex: RESTAURANT-CENTRE)
+- Polling ms: intervalle de synchronisation (3000 recommande)
+- Nom du service: AxiaFlexPrintAgent (laisser par defaut)
+
+Configuration dans l'application
+--------------------------------
+Dans Parametres > Materiel:
+1) Verifier que les terminaux agents remontent (online/offline).
+2) Ajouter les imprimantes logiques (ticket client, cuisine, bar).
+3) Lier chaque imprimante logique a:
+   - un terminal agent,
+   - une imprimante locale remontee par ce terminal.
+4) Sauvegarder les liaisons.
+
+Mode mixte supporte
+-------------------
+- Si une imprimante est liee a un terminal agent: impression via job cloud -> agent.
+- Si non liee: fallback impression locale (mode historique).
+
+Bonnes pratiques
+----------------
+- Installer les imprimantes dans Windows et valider un test impression systeme.
+- Utiliser des alias terminaux clairs et stables.
+- Garder AGENT_MASTER_TOKEN confidentiel.
+- En cas de fuite, regenerer la cle et reconfigurer les agents.
+
+Diagnostic rapide
+-----------------
+- Service agent:
+  Get-Service AxiaFlexPrintAgent
+- Si l'agent est offline:
+  verifier internet du poste, URL cloud, token master, et droits service Windows.
+- Si une imprimante n'apparait pas:
+  verifier qu'elle est installee localement sur le poste agent.

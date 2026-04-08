@@ -305,6 +305,27 @@ export const openApiPaths: Record<string, PathItem> = {
   '/pos/settings/migration-reports/latest': {
     get: op('Settings', 'Lire le dernier rapport de migration legacy (query userId)'),
   },
+  '/pos/agent/register': {
+    post: op('Agent', 'Enregistrer un terminal agent local'),
+  },
+  '/pos/agent/heartbeat': {
+    post: op('Agent', 'Heartbeat agent local'),
+  },
+  '/pos/agent/printers': {
+    post: op('Agent', 'Mettre à jour les imprimantes détectées côté agent'),
+  },
+  '/pos/agent/jobs/pull': {
+    get: op('Agent', 'Récupérer les jobs d’impression en attente'),
+  },
+  '/pos/agent/jobs/{id}/ack': {
+    post: op('Agent', 'Accuser réception résultat job impression', ['id']),
+  },
+  '/pos/terminals': {
+    get: op('Settings', 'Lister les terminaux/agents et imprimantes remontées'),
+  },
+  '/pos/printers/{id}/bind-terminal': {
+    patch: op('Settings', 'Lier une imprimante configurée à un terminal/printer agent', ['id']),
+  },
 
   '/pos/stock/movements': {
     get: op('Stock', 'Mouvements de stock'),

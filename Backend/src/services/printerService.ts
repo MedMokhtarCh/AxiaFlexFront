@@ -13,6 +13,7 @@ import { OrderItem } from '../entity/OrderItem.js';
 import { User } from '../entity/User.js';
 import { getSettings } from './settingsService.js';
 import { savePdfArchiveFromFile } from './pdfArchiveService.js';
+import { enqueuePrintJob } from './printJobService.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -101,19 +102,49 @@ export async function deletePrinter(id: string) {
 }
 
 export async function listDetectedPrinters() {
-	if (process.platform !== 'win32') return [];
+	if (process.platform === 'win32') {
+		try {
+			const psScript =
+				"$items = @(); " +
+				"try { $items += Get-Printer | Select-Object Name,DriverName,PortName,Shared,ShareName,ComputerName,Type,Comment } catch {}; " +
+				"try { $items += Get-CimInstance Win32_Printer | Select-Object @{n='Name';e={$_.Name}},@{n='DriverName';e={$_.DriverName}},@{n='PortName';e={$_.PortName}},@{n='Shared';e={$_.Shared}},@{n='ShareName';e={$_.ShareName}},@{n='ComputerName';e={$_.SystemName}},@{n='Type';e={$_.PrinterStatus}},@{n='Comment';e={$_.Comment}} } catch {}; " +
+				"$dedup = $items | Where-Object { $_.Name } | Group-Object Name | ForEach-Object { $_.Group | Select-Object -First 1 }; " +
+				"$dedup | ConvertTo-Json -Compress";
+			const { stdout } = await execFileAsync('powershell', [
+				'-NoProfile',
+				'-ExecutionPolicy',
+				'Bypass',
+				'-Command',
+				psScript,
+			]);
+			const text = (stdout || '').trim();
+			if (!text) return [];
+			const data = JSON.parse(text);
+			return Array.isArray(data) ? data : [data];
+		} catch {
+			return [];
+		}
+	}
+	// Linux fallback (CUPS): returns printer queues if available on host.
 	try {
-		const { stdout } = await execFileAsync('powershell', [
-			'-NoProfile',
-			'-ExecutionPolicy',
-			'Bypass',
-			'-Command',
-			'Get-Printer | Select-Object Name,DriverName,PortName,Shared,ShareName | ConvertTo-Json -Compress',
-		]);
-		const text = (stdout || '').trim();
-		if (!text) return [];
-		const data = JSON.parse(text);
-		return Array.isArray(data) ? data : [data];
+		const { stdout } = await execFileAsync('lpstat', ['-v']);
+		const lines = String(stdout || '')
+			.split(/\r?\n/)
+			.map((l) => l.trim())
+			.filter(Boolean);
+		return lines.map((line) => {
+			// Example: "device for HP_LaserJet: socket://192.168.1.50"
+			const m = line.match(/^device for\s+(.+?):\s+(.+)$/i);
+			const name = m?.[1] ? String(m[1]).trim() : line;
+			const port = m?.[2] ? String(m[2]).trim() : '';
+			return {
+				Name: name,
+				DriverName: 'CUPS',
+				PortName: port,
+				Shared: false,
+				ShareName: null,
+			};
+		});
 	} catch {
 		return [];
 	}
@@ -279,7 +310,25 @@ export async function saveCategorizedPdf(opts: {
   return filePath;
 }
 
-const printText = async (printerName: string, text: string) => {
+const printText = async (
+	printerName: string,
+	text: string,
+	printerMeta?: { terminalNodeId?: string | null; terminalPrinterLocalId?: string | null },
+) => {
+	if (printerMeta?.terminalNodeId) {
+		await enqueuePrintJob({
+			terminalNodeId: String(printerMeta.terminalNodeId),
+			printerLocalId: printerMeta.terminalPrinterLocalId || null,
+			printerName: printerName || null,
+			payload: {
+				type: 'RAW_TEXT_PRINT',
+				text,
+				printerName,
+			},
+			maxRetries: 5,
+		});
+		return;
+	}
 	const dir = path.join(process.cwd(), 'tmp');
 	await fs.mkdir(dir, { recursive: true });
 	const filePath = path.join(dir, `print-${Date.now()}.txt`);
@@ -556,7 +605,10 @@ export async function printOrderItemsByPrinter(
         ticketTemplate: (settings as any)?.clientTicketTemplate,
       });
     } catch {}
-		await printText(printer.name, text);
+		await printText(printer.name, text, {
+			terminalNodeId: (printer as any).terminalNodeId || null,
+			terminalPrinterLocalId: (printer as any).terminalPrinterLocalId || null,
+		});
 		printed = true;
 	}
 	if (!printed) {
@@ -625,7 +677,11 @@ export async function printPaymentReceipt(order: any, ticket: Ticket, paymentMet
     );
     return;
   }
-  await printText(printTarget, text);
+  const mapped = printers.find((p: any) => String(p.name || '') === String(printTarget || ''));
+  await printText(printTarget, text, {
+    terminalNodeId: (mapped as any)?.terminalNodeId || null,
+    terminalPrinterLocalId: (mapped as any)?.terminalPrinterLocalId || null,
+  });
 }
 
 export async function printTicket(ticketId: string) {
@@ -707,7 +763,11 @@ export async function printProvisionalClientReceipt(orderId: string) {
     );
     return;
   }
-  await printText(printTarget, text);
+  const mapped = printers.find((p: any) => String(p.name || '') === String(printTarget || ''));
+  await printText(printTarget, text, {
+    terminalNodeId: (mapped as any)?.terminalNodeId || null,
+    terminalPrinterLocalId: (mapped as any)?.terminalPrinterLocalId || null,
+  });
 }
 
 export async function printProductionTest(opts: {
@@ -757,7 +817,10 @@ export async function printProductionTest(opts: {
     String(tpl?.footerText || '').trim(),
     '',
   ].filter(Boolean);
-  await printText(target.name, lines.join('\n'));
+  await printText(target.name, lines.join('\n'), {
+    terminalNodeId: (target as any).terminalNodeId || null,
+    terminalPrinterLocalId: (target as any).terminalPrinterLocalId || null,
+  });
   return {
     ok: true,
     printer: target.name,

@@ -21,6 +21,7 @@ import * as ticketController from '../controllers/ticketController.js';
 import * as paymentController from '../controllers/paymentController.js';
 import * as paymentInstrumentController from '../controllers/paymentInstrumentController.js';
 import * as auditLogController from '../controllers/auditLogController.js';
+import * as agentController from '../controllers/agentController.js';
 
 const router = Router();
 
@@ -158,6 +159,15 @@ router.get('/settings/pdf-archives', settingsController.listPdfArchives);
 router.get('/settings/pdf-archives/download', settingsController.downloadPdfArchiveFile);
 router.get('/settings/migration-reports', settingsController.listMigrationReports);
 router.get('/settings/migration-reports/latest', settingsController.getLatestMigrationReport);
+
+// Agent local (cloud printing bridge)
+router.post('/agent/register', agentController.registerAgent);
+router.post('/agent/heartbeat', agentController.heartbeatAgent);
+router.post('/agent/printers', agentController.updateAgentPrinters);
+router.get('/agent/jobs/pull', agentController.pullAgentJobs);
+router.post('/agent/jobs/:id/ack', agentController.ackAgentJob);
+router.get('/terminals', agentController.listTerminals);
+router.patch('/printers/:id/bind-terminal', agentController.bindPrinterToTerminal);
 
 router.get('/stock/movements', stockController.listMovements);
 router.post('/stock/movements', stockController.createMovement);

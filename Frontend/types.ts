@@ -373,6 +373,8 @@ export interface Printer {
   type: string;
   /** Style du bon de préparation (modèles cuisine / bar). */
   bonProfile?: "kitchen" | "bar" | null;
+  terminalNodeId?: string | null;
+  terminalPrinterLocalId?: string | null;
 }
 
 export interface DetectedPrinter {
@@ -381,6 +383,31 @@ export interface DetectedPrinter {
   PortName?: string;
   Shared?: boolean;
   ShareName?: string;
+}
+
+export interface TerminalNodePrinter {
+  id: string;
+  terminalNodeId: string;
+  printerLocalId: string;
+  name: string;
+  transport: "USB" | "TCP" | "SHARED" | "UNKNOWN";
+  driverName?: string | null;
+  portName?: string | null;
+  isOnline: boolean;
+  updatedAt: number;
+}
+
+export interface TerminalNodeInfo {
+  id: string;
+  alias: string;
+  fingerprintHash: string;
+  siteName?: string | null;
+  osInfo?: string | null;
+  agentVersion?: string | null;
+  online: boolean;
+  lastSeenAt?: number | null;
+  updatedAt: number;
+  printers: TerminalNodePrinter[];
 }
 
 export interface ProductVariant {
@@ -923,6 +950,11 @@ export type ApiResponseMap = {
     profile?: string;
   };
   '/pos/printers/detected': DetectedPrinter[];
+  '/pos/terminals': {
+    terminals: TerminalNodeInfo[];
+    bindings: Printer[];
+  };
+  '/pos/printers/:id/bind-terminal': Printer;
   '/pos/clients': Client[];
   '/pos/clients/:id': Client;
   '/pos/invoices': Invoice[];
