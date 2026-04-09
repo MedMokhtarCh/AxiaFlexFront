@@ -53,6 +53,23 @@ input {
   padding: 10px;
 }
 
+.input-inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.input-inline input {
+  flex: 1;
+}
+
+.icon-btn {
+  min-width: 54px;
+  padding: 10px 8px;
+  background: #1f2937;
+  border: 1px solid #334155;
+}
+
 textarea,
 select {
   width: 100%;

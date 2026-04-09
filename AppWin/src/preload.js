@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld("appWinApi", {
     ipcRenderer.invoke("agent:test-print", printerName, text),
   installService: () => ipcRenderer.invoke("service:install"),
   patchService: () => ipcRenderer.invoke("service:patch"),
+  restartTask: () => ipcRenderer.invoke("service:restart-task"),
+  openWorkerLog: () => ipcRenderer.invoke("service:open-worker-log"),
   uninstallService: () => ipcRenderer.invoke("service:uninstall"),
   getServiceStatus: () => ipcRenderer.invoke("service:status"),
   onAgentLog: (cb) => ipcRenderer.on("agent-log", (_e, line) => cb(line)),

@@ -5,6 +5,7 @@ const byId = (id) => document.getElementById(id);
 const els = {
   cloudApiUrl: byId("cloudApiUrl"),
   agentMasterToken: byId("agentMasterToken"),
+  toggleTokenBtn: byId("toggleTokenBtn"),
   terminalAlias: byId("terminalAlias"),
   siteName: byId("siteName"),
   pollMs: byId("pollMs"),
@@ -17,6 +18,8 @@ const els = {
   serviceStatusText: byId("serviceStatusText"),
   installServiceBtn: byId("installServiceBtn"),
   patchServiceBtn: byId("patchServiceBtn"),
+  restartTaskBtn: byId("restartTaskBtn"),
+  openWorkerLogBtn: byId("openWorkerLogBtn"),
   uninstallServiceBtn: byId("uninstallServiceBtn"),
   refreshServiceBtn: byId("refreshServiceBtn"),
   refreshPrintersBtn: byId("refreshPrintersBtn"),
@@ -188,6 +191,25 @@ els.patchServiceBtn.addEventListener("click", async () => {
   await refreshServiceStatus();
 });
 
+els.restartTaskBtn.addEventListener("click", async () => {
+  const res = await appWinApi.restartTask();
+  appendLog(
+    res?.ok
+      ? `Redemarrage tache: ${res.stdout || "OK"}`
+      : `Erreur redemarrage tache: ${res?.stderr || res?.stdout || res?.error || "inconnue"}`,
+  );
+  await refreshServiceStatus();
+});
+
+els.openWorkerLogBtn.addEventListener("click", async () => {
+  const res = await appWinApi.openWorkerLog();
+  appendLog(
+    res?.ok
+      ? `Ouverture log agent: ${res.path || "OK"}`
+      : `Erreur ouverture log agent: ${res?.error || "inconnue"}`,
+  );
+});
+
 els.uninstallServiceBtn.addEventListener("click", async () => {
   const res = await appWinApi.uninstallService();
   appendLog(
@@ -215,6 +237,12 @@ els.testPrintBtn.addEventListener("click", async () => {
   }
   const res = await appWinApi.testPrint(printerName, text);
   appendLog(res?.ok ? "Test impression envoye." : `Erreur test impression: ${res?.error || "inconnue"}`);
+});
+
+els.toggleTokenBtn.addEventListener("click", () => {
+  const isPwd = els.agentMasterToken.type === "password";
+  els.agentMasterToken.type = isPwd ? "text" : "password";
+  els.toggleTokenBtn.textContent = isPwd ? "masquer" : "oeil";
 });
 
 appWinApi.onAgentLog((line) => appendLog(line));

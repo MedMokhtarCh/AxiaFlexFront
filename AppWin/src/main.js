@@ -515,6 +515,36 @@ app.whenReady().then(() => {
       stderr: installRes.stderr || "",
     };
   });
+  ipcMain.handle("service:restart-task", async () => {
+    const endRes = await runPowershellCommand("schtasks /End /TN 'AxiaFlexPrintAgent'");
+    const runRes = await runPowershellCommand("schtasks /Run /TN 'AxiaFlexPrintAgent'");
+    const ok = runRes.ok;
+    return {
+      ok,
+      code: ok ? 0 : runRes.code,
+      stdout: [endRes.stdout, runRes.stdout].filter(Boolean).join("\n"),
+      stderr: [endRes.stderr, runRes.stderr].filter(Boolean).join("\n"),
+    };
+  });
+  ipcMain.handle("service:open-worker-log", async () => {
+    try {
+      const logDir = path.join(process.env.LOCALAPPDATA || os.tmpdir(), "AxiaFlex", "AppWinAgent");
+      const logPath = path.join(logDir, "worker.log");
+      try {
+        fs.mkdirSync(logDir, { recursive: true });
+        if (!fs.existsSync(logPath)) fs.writeFileSync(logPath, "", "utf8");
+      } catch {}
+      const child = spawn("notepad.exe", [logPath], {
+        detached: true,
+        windowsHide: true,
+        stdio: "ignore",
+      });
+      child.unref();
+      return { ok: true, path: logPath };
+    } catch (e) {
+      return { ok: false, error: String(e?.message || e) };
+    }
+  });
   ipcMain.handle("service:uninstall", async () => {
     const scriptPath = resolvePsScript("uninstall-service.ps1");
     if (!scriptPath) {

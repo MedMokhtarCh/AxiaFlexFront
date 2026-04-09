@@ -22,7 +22,10 @@
           </label>
           <label>
             AGENT_MASTER_TOKEN
-            <input id="agentMasterToken" type="password" placeholder="token maître" />
+            <div class="input-inline">
+              <input id="agentMasterToken" type="password" placeholder="token maître" />
+              <button id="toggleTokenBtn" type="button" class="icon-btn" title="Afficher / masquer le token">oeil</button>
+            </div>
           </label>
           <label>
             Alias terminal
@@ -64,6 +67,8 @@
         <div class="actions">
           <button id="installServiceBtn" class="success">Installer démarrage auto</button>
           <button id="patchServiceBtn">Patch démarrage auto</button>
+          <button id="restartTaskBtn">Redémarrer tâche</button>
+          <button id="openWorkerLogBtn">Verifier log agent</button>
           <button id="uninstallServiceBtn" class="danger">Supprimer démarrage auto</button>
           <button id="refreshServiceBtn">Rafraîchir statut</button>
         </div>
