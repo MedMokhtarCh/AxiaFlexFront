@@ -677,7 +677,7 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
           cart,
           finalTotal,
           lineDiscountSum + ticketDiscountMoney,
-          false,
+          true,
           OrderStatus.PENDING,
           {
             timbre: timbreAmount,
