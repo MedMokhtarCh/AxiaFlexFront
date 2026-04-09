@@ -2145,6 +2145,7 @@ interface POSContextType {
     station?: "KITCHEN" | "BAR";
     printerId?: string;
   }) => Promise<void>;
+  printReceiptTest: (opts: { printerId?: string }) => Promise<void>;
   addStockMovement: (movement: {
     productId: string;
     variantId?: string | null;
@@ -3830,6 +3831,15 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
       }),
     });
   };
+  const printReceiptTest = async (opts: { printerId?: string }) => {
+    await apiFetchTyped("/pos/printers/test-receipt-print", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        printerId: opts.printerId,
+      }),
+    });
+  };
 
   const addStockMovement = async (movement: {
     productId: string;
@@ -5086,6 +5096,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
         getTerminalNodes,
         bindPrinterTerminal,
         printProductionTest,
+        printReceiptTest,
         addStockMovement,
         updateStockMovement,
         deleteStockMovement,

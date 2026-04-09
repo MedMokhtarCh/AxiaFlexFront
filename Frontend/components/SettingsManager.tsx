@@ -269,6 +269,7 @@ const SettingsManager: React.FC = () => {
     listRestaurantCardMovements,
     testExternalRestaurantCardApi,
     printProductionTest,
+    printReceiptTest,
     getPdfArchives,
     downloadPdfArchiveFile,
   } = usePOS();
@@ -1390,6 +1391,15 @@ const SettingsManager: React.FC = () => {
       notifySuccess("Bon de test envoyé sur cette imprimante.");
     } catch (e: any) {
       notifyError(e?.message || "Test impression impossible.");
+    }
+  };
+
+  const handlePrintReceiptPrinterTest = async (printerId: string) => {
+    try {
+      await printReceiptTest({ printerId });
+      notifySuccess("Ticket client test envoyé sur cette imprimante.");
+    } catch (e: any) {
+      notifyError(e?.message || "Test ticket client impossible.");
     }
   };
 
@@ -4333,7 +4343,15 @@ const SettingsManager: React.FC = () => {
                         >
                           Test
                         </button>
-                      ) : null}
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handlePrintReceiptPrinterTest(p.id)}
+                          className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-[10px] font-black uppercase text-slate-600"
+                        >
+                          Test ticket
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => deletePrinter(p.id)}

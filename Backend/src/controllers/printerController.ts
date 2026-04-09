@@ -51,3 +51,16 @@ export async function testPrint(req: Request, res: Response) {
     res.status(400).json({ error: e?.message || 'Test impression impossible' });
   }
 }
+
+export async function testReceiptPrint(req: Request, res: Response) {
+  try {
+    const printerId = String(req.body?.printerId || '').trim();
+    const result = await printerService.printReceiptTest({
+      printerId: printerId || undefined,
+    });
+    void logAppAdminAction(req, 'confirm', 'printer_test_receipt_print', printerId || 'default', {});
+    res.json(result);
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || 'Test ticket client impossible' });
+  }
+}

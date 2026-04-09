@@ -828,3 +828,42 @@ export async function printProductionTest(opts: {
     profile: isBar ? 'bar' : 'kitchen',
   };
 }
+
+export async function printReceiptTest(opts: { printerId?: string }) {
+  const printerRepo = AppDataSource.getRepository(Printer);
+  const printers = await printerRepo.find();
+  const receiptPrinters = printers.filter(
+    (p) => String((p as any).type || '').toUpperCase() === 'RECEIPT',
+  );
+  let target: Printer | undefined;
+  if (opts.printerId) {
+    target = receiptPrinters.find((p) => p.id === opts.printerId);
+  }
+  if (!target) {
+    target = receiptPrinters[0];
+  }
+  if (!target?.name) {
+    throw new Error('Aucune imprimante ticket client (RECEIPT) configurée');
+  }
+  const now = new Date();
+  const lines = [
+    'TICKET CLIENT - TEST',
+    `Heure: ${now.toLocaleString()}`,
+    '------------------------------',
+    'Article test x1  1.000',
+    'TOTAL            1.000',
+    '',
+    'Merci et a bientot !',
+    '',
+  ];
+  await printText(target.name, lines.join('\n'), {
+    terminalNodeId: (target as any).terminalNodeId || null,
+    terminalPrinterLocalId: (target as any).terminalPrinterLocalId || null,
+  });
+  return {
+    ok: true,
+    printer: target.name,
+    printerId: target.id,
+    profile: 'receipt',
+  };
+}

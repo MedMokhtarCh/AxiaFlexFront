@@ -143,6 +143,7 @@ router.get('/printers', printerController.listPrinters);
 router.get('/printers/detected', printerController.listDetectedPrinters);
 router.post('/printers', printerController.createPrinter);
 router.post('/printers/test-print', printerController.testPrint);
+router.post('/printers/test-receipt-print', printerController.testReceiptPrint);
 router.delete('/printers/:id', printerController.deletePrinter);
 
 router.get('/promotions', promotionController.listPromotions);
