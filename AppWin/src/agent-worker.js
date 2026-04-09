@@ -119,6 +119,27 @@ async function printRawText(printerName, text) {
   }
 }
 
+async function resolvePrinterNameForJob(job, payload) {
+  const targetLocalId = String(
+    job?.targetPrinterLocalId || payload?.printerLocalId || "",
+  ).trim();
+  const targetName = String(
+    job?.targetPrinterName || payload?.printerName || "",
+  ).trim();
+  if (!targetLocalId && targetName) return targetName;
+  const printers = await detectPrinters();
+  const byId = printers.find((p) => {
+    const localId = String(p?.printerLocalId || "").trim().toLowerCase();
+    const portName = String(p?.PortName || "").trim().toLowerCase();
+    const name = String(p?.Name || "").trim().toLowerCase();
+    const needle = targetLocalId.toLowerCase();
+    return needle && (needle === localId || needle === portName || needle === name);
+  });
+  if (byId?.Name) return String(byId.Name).trim();
+  if (targetName) return targetName;
+  return "";
+}
+
 async function processJobs(token) {
   const pulled = await cloudFetch("/pos/agent/jobs/pull?limit=20", {
     headers: { Authorization: `Bearer ${token}` },
@@ -132,7 +153,7 @@ async function processJobs(token) {
       if (String(payload.type || "") !== "RAW_TEXT_PRINT") {
         throw new Error("Unsupported job payload type");
       }
-      const printerName = String(j?.targetPrinterName || payload.printerName || "").trim();
+      const printerName = await resolvePrinterNameForJob(j, payload);
       if (!printerName) throw new Error("Missing printerName");
       await printRawText(printerName, String(payload.text || ""));
     } catch (e) {

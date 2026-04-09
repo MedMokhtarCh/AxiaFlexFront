@@ -40,6 +40,24 @@ function Test-NetSessionOk {
   }
 }
 
+function Resolve-NodeCommand {
+  $candidates = @()
+  try {
+    $fromCmd = (Get-Command node -ErrorAction Stop).Source
+    if ($fromCmd) { $candidates += $fromCmd }
+  } catch {}
+  $candidates += @(
+    (Join-Path $env:ProgramFiles "nodejs\node.exe"),
+    (Join-Path ${env:ProgramFiles(x86)} "nodejs\node.exe")
+  )
+  foreach ($p in $candidates) {
+    try {
+      if ($p -and (Test-Path $p)) { return $p }
+    } catch {}
+  }
+  return $null
+}
+
 function Escape-BatchEnv([string]$s) {
   if ($null -eq $s) { return "" }
   return ($s -replace '%', '%%')
@@ -55,7 +73,10 @@ if (-not $elevated) {
 
 $agentDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Write-Host "[appwin-agent] Etape 2/5: recherche de Node.js..."
-$nodeCmd = (Get-Command node -ErrorAction Stop).Source
+$nodeCmd = Resolve-NodeCommand
+if (-not $nodeCmd) {
+  throw "Node.js introuvable. Relancez l'installateur AppWin (il installe Node automatiquement) ou installez Node LTS puis recommencez."
+}
 Write-Host "[appwin-agent]   Node: $nodeCmd"
 $agentEntry = Join-Path $agentDir "agent-worker.js"
 

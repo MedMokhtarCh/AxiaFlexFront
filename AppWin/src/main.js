@@ -73,6 +73,28 @@ function resolvePsScript(name) {
   return findFirstExistingPath(candidates);
 }
 
+function resolveNodeExe() {
+  const candidates = [];
+  if (!app.isPackaged && process.execPath) {
+    candidates.push(process.execPath);
+  }
+  if (process.env.ProgramFiles) {
+    candidates.push(path.join(process.env.ProgramFiles, "nodejs", "node.exe"));
+  }
+  if (process.env["ProgramFiles(x86)"]) {
+    candidates.push(path.join(process.env["ProgramFiles(x86)"], "nodejs", "node.exe"));
+  }
+  candidates.push("node.exe");
+  candidates.push("node");
+  return candidates.find((p) => {
+    try {
+      return Boolean(p) && (p === "node" || p === "node.exe" || fs.existsSync(p));
+    } catch {
+      return false;
+    }
+  });
+}
+
 /** PowerShell 64 bits explicite (évite SysWOW64 si Electron est 32 bits). */
 function getPowershellExe() {
   const root = process.env.SystemRoot || process.env.windir || "C:\\Windows";
@@ -279,6 +301,28 @@ function runPowershellCommand(command) {
   });
 }
 
+function parseScheduledTaskList(rawText, taskName = "AxiaFlexPrintAgent") {
+  const text = String(rawText || "");
+  if (!text.trim()) return null;
+  const hasTask =
+    new RegExp(`Nom de la t[âa]che:\\s*\\\\?${taskName}`, "i").test(text) ||
+    new RegExp(`TaskName:\\s*\\\\?${taskName}`, "i").test(text);
+  if (!hasTask) return { mode: "task", installed: false };
+  const stateMatch =
+    text.match(/Statut:\s*(.+)/i) || text.match(/Status:\s*(.+)/i);
+  const codeMatch =
+    text.match(/Dernier r[ée]sultat:\s*(-?\d+)/i) ||
+    text.match(/Last Result:\s*(-?\d+)/i);
+  return {
+    mode: "task",
+    installed: true,
+    taskName,
+    state: stateMatch ? String(stateMatch[1] || "").trim() : null,
+    lastRunTime: null,
+    lastTaskResult: codeMatch ? Number.parseInt(codeMatch[1], 10) : null,
+  };
+}
+
 function startAgent(config) {
   if (agentProcess) return { ok: false, error: "Agent déjà démarré." };
   const agentScriptPath = resolveAgentPath();
@@ -297,13 +341,29 @@ function startAgent(config) {
     AGENT_POLL_MS: String(Math.max(1500, Number(config.pollMs) || 3000)),
   };
 
-  agentProcess = spawn(process.execPath, [agentScriptPath], {
-    cwd: path.dirname(agentScriptPath),
-    env,
-    windowsHide: true,
-  });
+  const nodeExe = resolveNodeExe();
+  if (!nodeExe) {
+    return { ok: false, error: "Node.js introuvable. Installez Node LTS puis relancez." };
+  }
+  pushLog(`Lancement agent via: ${nodeExe}`);
+  try {
+    agentProcess = spawn(nodeExe, [agentScriptPath], {
+      cwd: path.dirname(agentScriptPath),
+      env,
+      windowsHide: true,
+    });
+  } catch (e) {
+    return { ok: false, error: `Echec démarrage agent: ${String(e?.message || e)}` };
+  }
 
   pushLog("Agent démarré.");
+  agentProcess.on("error", (err) => {
+    pushLog(`ERR: spawn agent: ${String(err?.message || err)}`);
+    agentProcess = null;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("agent-status", false);
+    }
+  });
   agentProcess.stdout.on("data", (buf) => pushLog(buf.toString().trim()));
   agentProcess.stderr.on("data", (buf) => pushLog(`ERR: ${buf.toString().trim()}`));
   agentProcess.on("close", (code) => {
@@ -480,8 +540,24 @@ $i = $t | Get-ScheduledTaskInfo
     if (!out.ok || !out.stdout) return { ok: true, status: null, mode: "task" };
     try {
       const j = JSON.parse(out.stdout);
+      if (j && j.mode === "task" && j.installed === false) {
+        const fallback = await runPowershellCommand(
+          'schtasks /Query /TN "AxiaFlexPrintAgent" /V /FO LIST',
+        );
+        if (fallback.ok && fallback.stdout) {
+          const parsed = parseScheduledTaskList(fallback.stdout, "AxiaFlexPrintAgent");
+          if (parsed) return { ok: true, status: parsed };
+        }
+      }
       return { ok: true, status: j };
     } catch {
+      const fallback = await runPowershellCommand(
+        'schtasks /Query /TN "AxiaFlexPrintAgent" /V /FO LIST',
+      );
+      if (fallback.ok && fallback.stdout) {
+        const parsed = parseScheduledTaskList(fallback.stdout, "AxiaFlexPrintAgent");
+        if (parsed) return { ok: true, status: parsed };
+      }
       return { ok: true, status: null, mode: "task" };
     }
   });
