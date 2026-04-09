@@ -93,6 +93,39 @@ button.danger {
   color: #94a3b8;
 }
 
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.badge-ok {
+  background: #052e16;
+  color: #86efac;
+  border-color: #166534;
+}
+
+.badge-warn {
+  background: #3f2300;
+  color: #fcd34d;
+  border-color: #92400e;
+}
+
+.badge-err {
+  background: #450a0a;
+  color: #fca5a5;
+  border-color: #b91c1c;
+}
+
+.badge-neutral {
+  background: #1e293b;
+  color: #cbd5e1;
+  border-color: #334155;
+}
+
 #logs {
   background: #020617;
   border: 1px solid #1e293b;

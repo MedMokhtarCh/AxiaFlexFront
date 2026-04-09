@@ -322,6 +322,11 @@ const SettingsManager: React.FC = () => {
   const [bindingDrafts, setBindingDrafts] = useState<
     Record<string, { terminalNodeId: string; terminalPrinterLocalId: string }>
   >({});
+  const printRoutingMode =
+    String((settings as any)?.printRoutingMode || "LOCAL").toUpperCase() ===
+    "CLOUD"
+      ? "CLOUD"
+      : "LOCAL";
 
   const guessBonProfileFromName = (name: string): "kitchen" | "bar" => {
     const n = name.toLowerCase();
@@ -337,6 +342,7 @@ const SettingsManager: React.FC = () => {
 
   useEffect(() => {
     if (activeTab !== "hardware") return;
+    if (printRoutingMode !== "CLOUD") return;
     const uid = String(currentUser?.id || "").trim();
     if (!uid) return;
     void getTerminalNodes(uid)
@@ -359,7 +365,7 @@ const SettingsManager: React.FC = () => {
         });
       })
       .catch(() => setTerminalNodes([]));
-  }, [activeTab, currentUser?.id, getTerminalNodes, printers]);
+  }, [activeTab, currentUser?.id, getTerminalNodes, printers, printRoutingMode]);
 
   // Zones & Tables States
   const [newZoneName, setNewZoneName] = useState("");
@@ -3991,6 +3997,49 @@ const SettingsManager: React.FC = () => {
             <div className="bg-white p-8 rounded-[2rem] border border-slate-100 space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-lg font-black text-slate-800">
+                  Mode d&apos;impression
+                </h3>
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                  {printRoutingMode === "CLOUD"
+                    ? "Cloud (agent)"
+                    : "Local (serveur)"}
+                </span>
+              </div>
+              <p className="text-xs font-bold text-slate-500">
+                Local garde le comportement historique (impression depuis le
+                serveur). Cloud utilise les terminaux agents AppWin et leurs
+                imprimantes remontées.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => updateSettings({ printRoutingMode: "LOCAL" } as any)}
+                  className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${
+                    printRoutingMode === "LOCAL"
+                      ? "bg-indigo-600 text-white"
+                      : "bg-slate-100 text-slate-700"
+                  }`}
+                >
+                  Local (serveur)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateSettings({ printRoutingMode: "CLOUD" } as any)}
+                  className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${
+                    printRoutingMode === "CLOUD"
+                      ? "bg-indigo-600 text-white"
+                      : "bg-slate-100 text-slate-700"
+                  }`}
+                >
+                  Cloud (agent)
+                </button>
+              </div>
+            </div>
+
+            {printRoutingMode === "CLOUD" ? (
+            <div className="bg-white p-8 rounded-[2rem] border border-slate-100 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-lg font-black text-slate-800">
                   Terminaux connectés
                 </h3>
                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
@@ -4045,6 +4094,7 @@ const SettingsManager: React.FC = () => {
                 </div>
               )}
             </div>
+            ) : null}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="bg-white p-10 rounded-[3rem] border border-slate-100 space-y-6">
@@ -4053,12 +4103,35 @@ const SettingsManager: React.FC = () => {
                 <div className="flex gap-2">
                   <button
                     onClick={async () => {
-                      const list = await getDetectedPrinters();
-                      setDetectedPrinters(Array.isArray(list) ? list : []);
+                      if (printRoutingMode === "CLOUD") {
+                        const uid = String(currentUser?.id || "").trim();
+                        if (!uid) {
+                          notifyError("Utilisateur requis pour charger les terminaux.");
+                          return;
+                        }
+                        const res = await getTerminalNodes(uid);
+                        const terminals = Array.isArray(res?.terminals)
+                          ? res.terminals
+                          : [];
+                        setTerminalNodes(terminals);
+                        const fromAgents: DetectedPrinter[] = terminals.flatMap((t) =>
+                          (Array.isArray(t.printers) ? t.printers : []).map((lp) => ({
+                            Name: String(lp.name || lp.printerLocalId || ""),
+                            DriverName: String(lp.driverName || ""),
+                            PortName: String(lp.printerLocalId || lp.portName || ""),
+                          })),
+                        );
+                        setDetectedPrinters(fromAgents);
+                      } else {
+                        const list = await getDetectedPrinters();
+                        setDetectedPrinters(Array.isArray(list) ? list : []);
+                      }
                     }}
                     className="flex-1 bg-slate-900 text-white font-black py-3 rounded-2xl"
                   >
-                    Détecter Imprimantes
+                    {printRoutingMode === "CLOUD"
+                      ? "Charger Imprimantes Cloud"
+                      : "Détecter Imprimantes"}
                   </button>
                   <button
                     onClick={() => {
@@ -4082,7 +4155,11 @@ const SettingsManager: React.FC = () => {
                   onChange={(e) => setSelectedDetected(e.target.value)}
                   className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold appearance-none bg-white"
                 >
-                  <option value="">Imprimantes détectées...</option>
+                  <option value="">
+                    {printRoutingMode === "CLOUD"
+                      ? "Imprimantes cloud détectées..."
+                      : "Imprimantes détectées..."}
+                  </option>
                   {detectedPrinters.map((p) => (
                     <option key={p.Name} value={p.Name}>
                       {p.Name}
@@ -4090,8 +4167,9 @@ const SettingsManager: React.FC = () => {
                   ))}
                 </select>
                 <p className="text-xs font-bold text-slate-500">
-                  Nom Windows / file d&apos;attente (tel qu&apos;affiché dans le
-                  système).
+                  {printRoutingMode === "CLOUD"
+                    ? "Nom remonté par l'agent AppWin (terminal distant)."
+                    : "Nom Windows / file d'attente (tel qu'affiché dans le système)."}
                 </p>
                 <input
                   type="text"
@@ -4232,14 +4310,17 @@ const SettingsManager: React.FC = () => {
                               }`}
                         </p>
                         <p className="text-[10px] text-slate-500 truncate">
-                          Terminal agent:{" "}
-                          {String((p as any).terminalNodeId || "").trim()
-                            ? (terminalNodes.find(
-                                (t) =>
-                                  t.id ===
-                                  String((p as any).terminalNodeId || "").trim(),
-                              )?.alias || "lié")
-                            : "non lié (mode local)"}
+                          {printRoutingMode === "CLOUD"
+                            ? `Terminal agent: ${
+                                String((p as any).terminalNodeId || "").trim()
+                                  ? terminalNodes.find(
+                                      (t) =>
+                                        t.id ===
+                                        String((p as any).terminalNodeId || "").trim(),
+                                    )?.alias || "lié"
+                                  : "non lié"
+                              }`
+                            : "Mode local actif (serveur)."}
                         </p>
                       </div>
                     </div>
@@ -4263,6 +4344,7 @@ const SettingsManager: React.FC = () => {
                     </div>
                   </div>
                 ))}
+                {printRoutingMode === "CLOUD" ? (
                 <div className="rounded-2xl border border-slate-100 p-4 bg-white">
                   <p className="text-xs font-black uppercase tracking-widest text-slate-500 mb-3">
                     Liaisons Cloud - Terminaux agents
@@ -4357,6 +4439,7 @@ const SettingsManager: React.FC = () => {
                     })}
                   </div>
                 </div>
+                ) : null}
               </div>
             </div>
           </div>

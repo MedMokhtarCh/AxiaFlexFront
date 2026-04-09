@@ -47,6 +47,10 @@
       <section class="card">
         <h2>Statut</h2>
         <p id="statusText">Agent: inconnu</p>
+        <p>
+          Tâche planifiée:
+          <span id="taskHealthBadge" class="badge badge-neutral">Inconnu</span>
+        </p>
         <p id="agentPathText" class="muted"></p>
         <p id="serviceStatusText" class="muted"></p>
       </section>
@@ -59,6 +63,7 @@
         </p>
         <div class="actions">
           <button id="installServiceBtn" class="success">Installer démarrage auto</button>
+          <button id="patchServiceBtn">Patch démarrage auto</button>
           <button id="uninstallServiceBtn" class="danger">Supprimer démarrage auto</button>
           <button id="refreshServiceBtn">Rafraîchir statut</button>
         </div>

@@ -147,16 +147,30 @@ async function processJobs(token) {
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function messageFromError(e) {
+  return e instanceof Error ? e.message : String(e || "unknown error");
+}
+
 async function loop() {
-  if (!API_BASE) throw new Error("CLOUD_API_URL manquant");
-  if (!MASTER_TOKEN) throw new Error("AGENT_MASTER_TOKEN manquant");
-  const reg = await ensureRegistered();
-  const token = String(reg.apiToken || "").trim();
-  if (!token) throw new Error("apiToken agent manquant");
-  console.log(`[appwin-agent] terminal=${reg.alias} id=${reg.terminalId}`);
   let lastInventory = 0;
+  let token = "";
+  let terminalLabel = "";
+
   while (true) {
     try {
+      if (!API_BASE) throw new Error("CLOUD_API_URL manquant");
+      if (!MASTER_TOKEN) throw new Error("AGENT_MASTER_TOKEN manquant");
+      if (!token) {
+        const reg = await ensureRegistered();
+        token = String(reg.apiToken || "").trim();
+        if (!token) throw new Error("apiToken agent manquant");
+        terminalLabel = String(reg.alias || reg.terminalId || "?");
+        console.log(`[appwin-agent] terminal=${terminalLabel} id=${reg.terminalId}`);
+      }
       await cloudFetch("/pos/agent/heartbeat", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -173,13 +187,23 @@ async function loop() {
       }
       await processJobs(token);
     } catch (e) {
-      console.error("[appwin-agent] cycle error:", e instanceof Error ? e.message : e);
+      const msg = messageFromError(e);
+      console.error("[appwin-agent] cycle error:", msg);
+      if (
+        msg.toLowerCase().includes("master token invalide") ||
+        msg.includes("401") ||
+        msg.toLowerCase().includes("unauthorized")
+      ) {
+        token = "";
+        terminalLabel = "";
+        lastInventory = 0;
+        await writeState({});
+      }
     }
-    await new Promise((r) => setTimeout(r, POLL_MS));
+    await sleep(POLL_MS);
   }
 }
 
 loop().catch((e) => {
-  console.error("[appwin-agent] fatal:", e instanceof Error ? e.message : e);
-  process.exit(1);
+  console.error("[appwin-agent] fatal non bloquant:", messageFromError(e));
 });

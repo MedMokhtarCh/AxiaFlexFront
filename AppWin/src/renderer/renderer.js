@@ -12,9 +12,11 @@ const els = {
   startBtn: byId("startBtn"),
   stopBtn: byId("stopBtn"),
   statusText: byId("statusText"),
+  taskHealthBadge: byId("taskHealthBadge"),
   agentPathText: byId("agentPathText"),
   serviceStatusText: byId("serviceStatusText"),
   installServiceBtn: byId("installServiceBtn"),
+  patchServiceBtn: byId("patchServiceBtn"),
   uninstallServiceBtn: byId("uninstallServiceBtn"),
   refreshServiceBtn: byId("refreshServiceBtn"),
   refreshPrintersBtn: byId("refreshPrintersBtn"),
@@ -35,8 +37,37 @@ function appendLog(line) {
   els.logs.scrollTop = els.logs.scrollHeight;
 }
 
+function setTaskHealth(label, kind) {
+  const el = els.taskHealthBadge;
+  if (!el) return;
+  el.textContent = label;
+  el.className = `badge badge-${kind}`;
+}
+
+function describeTaskResult(code) {
+  const n = Number(code);
+  if (!Number.isFinite(n)) return "Code inconnu.";
+  const bySigned = {
+    0: "Succès : dernière exécution terminée correctement.",
+    267009: "0x41301 : tâche en cours d'exécution.",
+    267008: "0x41300 : tâche prête à s'exécuter.",
+    267011: "0x41303 : tâche n'a pas encore été exécutée.",
+    "-1073740791": "0xC0000409 : crash du processus (arrêt anormal).",
+  };
+  if (Object.prototype.hasOwnProperty.call(bySigned, String(n))) {
+    return bySigned[String(n)];
+  }
+  const unsigned = n < 0 ? 0x100000000 + n : n;
+  const hex = `0x${unsigned.toString(16).toUpperCase()}`;
+  return `${hex} : résultat non mappé (voir Journaux des tâches Windows).`;
+}
+
 function setServiceStatus(statusObj) {
   if (!statusObj || statusObj.installed === false) {
+    setTaskHealth("Non installée", "neutral");
+    if (els.taskHealthBadge) {
+      els.taskHealthBadge.title = "Aucune tâche planifiée détectée.";
+    }
     els.serviceStatusText.textContent =
       "Demarrage auto: aucune tache planifiee (remplace le service Windows pour eviter l erreur 1053 avec Node.js).";
     return;
@@ -45,8 +76,24 @@ function setServiceStatus(statusObj) {
     const lr = statusObj.lastRunTime ? String(statusObj.lastRunTime) : "—";
     const lrCode =
       statusObj.lastTaskResult != null ? String(statusObj.lastTaskResult) : "?";
+    const codeNum = Number(statusObj.lastTaskResult);
+    const tooltip = describeTaskResult(codeNum);
+    if (els.taskHealthBadge) {
+      els.taskHealthBadge.title = tooltip;
+    }
+    if (statusObj.state === "Running" || codeNum === 267009) {
+      setTaskHealth("En cours", "warn");
+    } else if (codeNum === 0) {
+      setTaskHealth("OK", "ok");
+    } else {
+      setTaskHealth(`Erreur (${lrCode})`, "err");
+    }
     els.serviceStatusText.textContent = `Tache "${statusObj.taskName || "AxiaFlexPrintAgent"}": ${statusObj.state || "?"} | dernier run: ${lr} | code: ${lrCode}`;
     return;
+  }
+  setTaskHealth("Inconnu", "neutral");
+  if (els.taskHealthBadge) {
+    els.taskHealthBadge.title = "Statut de tâche non disponible.";
   }
   els.serviceStatusText.textContent = `Statut: ${JSON.stringify(statusObj)}`;
 }
@@ -126,6 +173,17 @@ els.installServiceBtn.addEventListener("click", async () => {
     res?.ok
       ? `Demarrage auto (tache planifiee): ${res.stdout || "OK"}`
       : `Erreur installation demarrage auto: ${res?.stderr || res?.stdout || res?.error || "inconnue"}`,
+  );
+  await refreshServiceStatus();
+});
+
+els.patchServiceBtn.addEventListener("click", async () => {
+  await saveConfig();
+  const res = await appWinApi.patchService();
+  appendLog(
+    res?.ok
+      ? `Patch demarrage auto: ${res.stdout || "OK"}`
+      : `Erreur patch demarrage auto: ${res?.stderr || res?.stdout || res?.error || "inconnue"}`,
   );
   await refreshServiceStatus();
 });

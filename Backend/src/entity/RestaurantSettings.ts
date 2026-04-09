@@ -51,6 +51,10 @@ export class RestaurantSettings {
   @Column('boolean', { default: false })
   printPreviewOnValidate!: boolean;
 
+  /** Routage impression: LOCAL (serveur local) ou CLOUD (agent AppWin). */
+  @Column('varchar', { length: 16, default: 'LOCAL' })
+  printRoutingMode!: 'LOCAL' | 'CLOUD';
+
   /** Force une UI tactile (boutons/champs plus grands) même sur PC. */
   @Column('boolean', { default: false })
   touchUiMode!: boolean;

@@ -416,6 +416,45 @@ app.whenReady().then(() => {
     pushLog(`Installation démarrage auto / tâche planifiée (PowerShell: ${getPowershellExe()}, UAC)…`);
     return runPowershellScriptElevated(scriptPath, flatArgs, { streamLog: true });
   });
+  ipcMain.handle("service:patch", async () => {
+    const cfg = currentConfig || loadConfig();
+    const scriptPath = resolvePsScript("install-service.ps1");
+    if (!scriptPath) {
+      return { ok: false, error: "install-service.ps1 introuvable (ressources AppWin)." };
+    }
+    const flatArgs = [
+      "-CloudApiUrl",
+      String(cfg.cloudApiUrl || ""),
+      "-AgentMasterToken",
+      String(cfg.agentMasterToken || ""),
+      "-TerminalAlias",
+      String(cfg.terminalAlias || os.hostname()),
+      "-SiteName",
+      String(cfg.siteName || ""),
+      "-PollMs",
+      String(Math.max(1500, Number(cfg.pollMs) || 3000)),
+      "-ServiceName",
+      "AxiaFlexPrintAgent",
+    ];
+    pushLog(`Patch démarrage auto / tâche planifiée (PowerShell: ${getPowershellExe()}, UAC)…`);
+    const installRes = await runPowershellScriptElevated(scriptPath, flatArgs, { streamLog: true });
+    if (!installRes.ok) return installRes;
+    const runRes = await runPowershellCommand("schtasks /Run /TN 'AxiaFlexPrintAgent'");
+    if (!runRes.ok) {
+      return {
+        ok: false,
+        code: runRes.code,
+        stdout: installRes.stdout,
+        stderr: runRes.stderr || runRes.stdout || "Patch applique, mais impossible de relancer la tache.",
+      };
+    }
+    return {
+      ok: true,
+      code: 0,
+      stdout: `${installRes.stdout || "Patch applique"}\nTache AxiaFlexPrintAgent relancee.`,
+      stderr: installRes.stderr || "",
+    };
+  });
   ipcMain.handle("service:uninstall", async () => {
     const scriptPath = resolvePsScript("uninstall-service.ps1");
     if (!scriptPath) {

@@ -226,6 +226,7 @@ interface AppSettings {
   applyTimbreToTicket: boolean;
   applyTimbreToInvoice: boolean;
   printPreviewOnValidate: boolean;
+  printRoutingMode?: "LOCAL" | "CLOUD";
   touchUiMode?: boolean;
   clientKdsDisplayMode?: "STANDARD" | "WALLBOARD" | "AUTO";
   /** Largeur min (px) pour wallboard en mode AUTO (défaut 1920). */
@@ -370,6 +371,7 @@ const SimulatedBackend = {
       applyTimbreToTicket: true,
       applyTimbreToInvoice: true,
       printPreviewOnValidate: false,
+      printRoutingMode: "LOCAL",
       touchUiMode: false,
       clientKdsDisplayMode: "STANDARD",
       clientKdsWallboardMinWidthPx: 1920,
@@ -2301,6 +2303,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
       applyTimbreToTicket: true,
       applyTimbreToInvoice: true,
       printPreviewOnValidate: false,
+      printRoutingMode: "LOCAL",
       touchUiMode: false,
       clientKdsDisplayMode: "STANDARD",
       clientKdsWallboardMinWidthPx: 1920,

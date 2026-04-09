@@ -31,6 +31,7 @@ const defaults = {
   applyTimbreToTicket: true,
   applyTimbreToInvoice: true,
   printPreviewOnValidate: false,
+  printRoutingMode: 'LOCAL' as const,
   touchUiMode: false,
   clientKdsDisplayMode: 'STANDARD',
   clientKdsWallboardMinWidthPx: 1920,
@@ -118,6 +119,11 @@ const normalizeCashClosingModePreference = (value: any): 'AUTO' | 'INDEPENDENT' 
   const raw = String(value ?? 'AUTO').trim().toUpperCase();
   if (raw === 'INDEPENDENT' || raw === 'SHIFT_HANDOVER' || raw === 'AUTO') return raw;
   return 'AUTO';
+};
+
+const normalizePrintRoutingMode = (value: any): 'LOCAL' | 'CLOUD' => {
+  const raw = String(value ?? 'LOCAL').trim().toUpperCase();
+  return raw === 'CLOUD' ? 'CLOUD' : 'LOCAL';
 };
 
 /** Mode effectif après application du paramètre et du type de société. */
@@ -371,6 +377,11 @@ export async function saveSettings(incomingUpdate: any) {
     applyTimbreToTicket: update?.applyTimbreToTicket ?? existing?.applyTimbreToTicket ?? defaults.applyTimbreToTicket,
     applyTimbreToInvoice: update?.applyTimbreToInvoice ?? existing?.applyTimbreToInvoice ?? defaults.applyTimbreToInvoice,
     printPreviewOnValidate: update?.printPreviewOnValidate ?? existing?.printPreviewOnValidate ?? defaults.printPreviewOnValidate,
+    printRoutingMode: normalizePrintRoutingMode(
+      update?.printRoutingMode ??
+        (existing as any)?.printRoutingMode ??
+        defaults.printRoutingMode,
+    ),
     touchUiMode: update?.touchUiMode ?? existing?.touchUiMode ?? defaults.touchUiMode,
     clientKdsDisplayMode: normalizeClientKdsDisplayMode(
       update?.clientKdsDisplayMode ??
