@@ -773,7 +773,8 @@ export async function addOrderPayment(
         } as any);
         await tRepo.manager.getRepository(TicketItem).save(ti as any);
       }
-      await printPaymentReceipt(saved as any, ticket as any, String((payment as any).method), amount);
+      // Client receipt printing is handled by frontend copy policy (printTicketCopies),
+      // to avoid duplicate prints (backend 1x + frontend Nx).
       // attach tickets list for frontend
       (saved as any).tickets = await tRepo.find({ where: { order: { id } } as any, relations: ['items'] as any });
     } catch (err) {
