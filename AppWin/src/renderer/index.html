@@ -52,15 +52,15 @@
       </section>
 
       <section class="card">
-        <h2>Service Windows</h2>
+        <h2>Démarrage automatique (tâche planifiée)</h2>
         <p class="muted">
-          Lance l'installation automatique en mode service (demarrage auto au boot).
-          Ouvrir AppWin en administrateur.
+          Remplace le « service Windows » : Node.js ne peut pas répondre au gestionnaire SCM (erreur 1053).
+          Une tâche « au démarrage du système » lance l’agent (compte SYSTEM). UAC requis.
         </p>
         <div class="actions">
-          <button id="installServiceBtn" class="success">Installer service</button>
-          <button id="uninstallServiceBtn" class="danger">Desinstaller service</button>
-          <button id="refreshServiceBtn">Rafraichir statut service</button>
+          <button id="installServiceBtn" class="success">Installer démarrage auto</button>
+          <button id="uninstallServiceBtn" class="danger">Supprimer démarrage auto</button>
+          <button id="refreshServiceBtn">Rafraîchir statut</button>
         </div>
       </section>
 

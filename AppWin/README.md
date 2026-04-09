@@ -6,7 +6,7 @@ Application Windows (Electron + Node) pour piloter l'agent d'impression local Ax
 
 - Windows
 - Node.js 20+
-- Dossier `Agent/` present a la racine du projet (script `Agent/index.js`)
+- Ressources agent embarquees dans `AppWin/resources/agent` (pas besoin du dossier `Agent/` du repo pour l'exe installe).
 
 ## Lancer en local
 
@@ -27,8 +27,8 @@ npm start
 - Sauvegarde locale de config dans `%APPDATA%` (userData Electron)
 - Demarrage / arret de l'agent
 - Logs en temps reel dans l'interface
-- Installation / desinstallation du service Windows depuis l'UI
-- Verification du statut du service Windows
+- Installation du **demarrage automatique** via **tache planifiee Windows** (au boot, compte SYSTEM) — pas un service SCM, pour eviter l'**erreur 1053** avec Node.js
+- Verification du statut de la tache depuis l'UI
 - Detection des imprimantes locales
 - Test impression sur imprimante selectionnee
 
@@ -56,5 +56,5 @@ Ce mode:
 ## Notes
 
 - Cette version demarre un worker local `src/agent-worker.js` (independant de `Agent/index.js`).
-- Pour installer/supprimer le service depuis l'UI, lancer AppWin en mode administrateur.
+- Pour installer/supprimer la tache depuis l'UI, accepter l'elevation UAC (ou administrateur).
 - Les scripts service et le worker sont integres dans `AppWin/resources/agent` et embarques dans le build (`extraResources`), sans dependance au dossier `Agent/` du repo.

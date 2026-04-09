@@ -105,14 +105,17 @@ function runPowershellScriptElevated(scriptPath, flatArgs = [], options = {}) {
     const val = flatArgs[i + 1];
     inv += ` ${key} '${escapePsSingle(val)}'`;
   }
+  const errPath = `${transcriptPath}.err.txt`;
   const wrapperContent = [
     "$ErrorActionPreference = 'Stop'",
     `$transcript = '${escapePsSingle(transcriptPath)}'`,
+    `$errFile = '${escapePsSingle(errPath)}'`,
     "try {",
     "  Start-Transcript -Path $transcript -Force | Out-Null",
     `  ${inv}`,
     "} catch {",
-    "  $_ | Out-File -Append -FilePath $transcript -Encoding utf8",
+    "  try { Stop-Transcript } catch {}",
+    "  try { $_ | Out-File -FilePath $errFile -Encoding utf8 } catch {}",
     "  exit 1",
     "} finally {",
     "  try { Stop-Transcript } catch {}",
@@ -176,6 +179,7 @@ function runPowershellScriptElevated(scriptPath, flatArgs = [], options = {}) {
       }
     });
     proc.on("close", (code) => {
+      const errPath = `${transcriptPath}.err.txt`;
       try {
         if (fs.existsSync(transcriptPath)) {
           const logContent = fs.readFileSync(transcriptPath, "utf8");
@@ -185,6 +189,15 @@ function runPowershellScriptElevated(scriptPath, flatArgs = [], options = {}) {
             .filter(Boolean)
             .forEach((line) => pushLog(`[service] ${line}`));
           fs.unlinkSync(transcriptPath);
+        }
+        if (fs.existsSync(errPath)) {
+          const errContent = fs.readFileSync(errPath, "utf8");
+          errContent
+            .split(/\r?\n/)
+            .map((l) => l.trim())
+            .filter(Boolean)
+            .forEach((line) => pushLog(`[service-err] ${line}`));
+          fs.unlinkSync(errPath);
         }
       } catch {}
       try {
@@ -400,7 +413,7 @@ app.whenReady().then(() => {
       "-ServiceName",
       "AxiaFlexPrintAgent",
     ];
-    pushLog(`Installation service (PowerShell: ${getPowershellExe()}, élévation UAC)…`);
+    pushLog(`Installation démarrage auto / tâche planifiée (PowerShell: ${getPowershellExe()}, UAC)…`);
     return runPowershellScriptElevated(scriptPath, flatArgs, { streamLog: true });
   });
   ipcMain.handle("service:uninstall", async () => {
@@ -408,20 +421,29 @@ app.whenReady().then(() => {
     if (!scriptPath) {
       return { ok: false, error: "uninstall-service.ps1 introuvable (ressources AppWin)." };
     }
-    pushLog("Désinstallation service (élévation UAC)…");
+    pushLog("Suppression démarrage auto / tâche planifiée (UAC)…");
     return runPowershellScriptElevated(scriptPath, ["-ServiceName", "AxiaFlexPrintAgent"], {
       streamLog: true,
     });
   });
   ipcMain.handle("service:status", async () => {
-    const out = await runPowershellCommand(
-      "Get-Service AxiaFlexPrintAgent -ErrorAction SilentlyContinue | Select-Object Name,Status,StartType | ConvertTo-Json -Compress",
-    );
-    if (!out.ok || !out.stdout) return { ok: true, status: null };
+    const ps = `
+$tn = 'AxiaFlexPrintAgent'
+$t = Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue
+if (-not $t) {
+  @{ mode = 'task'; installed = $false } | ConvertTo-Json -Compress
+  exit 0
+}
+$i = $t | Get-ScheduledTaskInfo
+@{ mode = 'task'; installed = $true; taskName = $tn; state = [string]$t.State; lastRunTime = if ($i.LastRunTime) { $i.LastRunTime.ToString('o') } else { $null }; lastTaskResult = $i.LastTaskResult } | ConvertTo-Json -Compress
+`.replace(/\r?\n/g, " ");
+    const out = await runPowershellCommand(ps);
+    if (!out.ok || !out.stdout) return { ok: true, status: null, mode: "task" };
     try {
-      return { ok: true, status: JSON.parse(out.stdout) };
+      const j = JSON.parse(out.stdout);
+      return { ok: true, status: j };
     } catch {
-      return { ok: true, status: null };
+      return { ok: true, status: null, mode: "task" };
     }
   });
 

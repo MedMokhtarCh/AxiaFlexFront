@@ -24,7 +24,6 @@ function Test-IsElevated {
   try {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
     $p = [Security.Principal.WindowsPrincipal]::new($id)
-    # BUILTIN\Administrators — fiable avec UAC (contrairement a WindowsBuiltInRole::Administrator seul)
     $adminSid = [Security.Principal.SecurityIdentifier]::new("S-1-5-32-544")
     return $p.IsInRole($adminSid)
   } catch {
@@ -41,12 +40,17 @@ function Test-NetSessionOk {
   }
 }
 
+function Escape-BatchEnv([string]$s) {
+  if ($null -eq $s) { return "" }
+  return ($s -replace '%', '%%')
+}
+
 $elevated = (Test-IsElevated) -or (Test-NetSessionOk)
 Write-Host "[appwin-agent] Etape 1/5: verification droits administrateur..."
 Write-Host "[appwin-agent]   - SID S-1-5-32-544 (Administrateurs): $(Test-IsElevated)"
-Write-Host "[appwin-agent]   - net session (methode classique): $(Test-NetSessionOk)"
+Write-Host "[appwin-agent]   - net session: $(Test-NetSessionOk)"
 if (-not $elevated) {
-  Write-Host "[appwin-agent] ATTENTION: session non detectee comme elevee. La creation du service peut echouer (acces refuse). Lancez AppWin via clic droit > Executer en tant qu'administrateur."
+  Write-Host "[appwin-agent] ATTENTION: privileges administrateur recommandes pour la tache planifiee."
 }
 
 $agentDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -59,48 +63,71 @@ if (-not (Test-Path $agentEntry)) {
   throw "agent-worker.js introuvable dans $agentDir"
 }
 
-$envRegPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
-Write-Host "[appwin-agent] Etape 3/5: creation / mise a jour du service $ServiceName ..."
-
-$binaryPath = "`"$nodeCmd`" `"$agentEntry`""
-
-$existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-if ($existing) {
-  if ($existing.Status -eq "Running") {
-    Stop-Service -Name $ServiceName -Force
+$taskName = $ServiceName
+Write-Host "[appwin-agent] Etape 3/5: nettoyage ancien service Windows (erreur 1053 si Node en service)..."
+$existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($existingSvc) {
+  if ($existingSvc.Status -eq "Running") {
+    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
   }
-  sc.exe delete $ServiceName | Out-Null
+  sc.exe delete $ServiceName 2>$null | Out-Null
   Start-Sleep -Seconds 2
 }
 
+Write-Host "[appwin-agent] Etape 4/5: tache planifiee demarrage machine (remplace service Windows)..."
 try {
-  New-Service `
-    -Name $ServiceName `
-    -BinaryPathName $binaryPath `
-    -DisplayName "AxiaFlex Print Agent" `
-    -StartupType Automatic `
-    -Description "AxiaFlex local print agent" `
-    -ErrorAction Stop | Out-Null
+  $oldTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  if ($oldTask) {
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+    Start-Sleep -Seconds 1
+  }
+} catch {}
+
+$launchCmd = Join-Path $agentDir "axiaflex-agent-launch.cmd"
+$c = Escape-BatchEnv $CloudApiUrl
+$t = Escape-BatchEnv $AgentMasterToken
+$a = Escape-BatchEnv $TerminalAlias
+$sn = Escape-BatchEnv $SiteName
+$pm = [int][Math]::Max(1500, $PollMs)
+
+$bat = @"
+@echo off
+setlocal
+set "CLOUD_API_URL=$c"
+set "AGENT_MASTER_TOKEN=$t"
+set "TERMINAL_ALIAS=$a"
+set "SITE_NAME=$sn"
+set "AGENT_POLL_MS=$pm"
+cd /d "%~dp0"
+"$nodeCmd" "%~dp0agent-worker.js"
+exit /b %ERRORLEVEL%
+"@
+[System.IO.File]::WriteAllText($launchCmd, $bat, [System.Text.Encoding]::ASCII)
+Write-Host "[appwin-agent]   Fichier lancement: $launchCmd"
+
+$action = New-ScheduledTaskAction -Execute $launchCmd -WorkingDirectory $agentDir
+$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
+$settings = New-ScheduledTaskSettingsSet `
+  -AllowStartIfOnBatteries `
+  -DontStopIfGoingOnBatteries `
+  -StartWhenAvailable
+
+$principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType InteractiveToken -RunLevel Highest
+
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+Write-Host "[appwin-agent]   Tache enregistree: $taskName (utilisateur $currentUser, au logon)"
+
+Write-Host "[appwin-agent] Etape 5/5: demarrage immediat de la tache (test)..."
+try {
+  Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+  Start-Sleep -Seconds 2
+  $info = Get-ScheduledTask -TaskName $taskName | Get-ScheduledTaskInfo
+  Write-Host "[appwin-agent] Derniere execution: $($info.LastRunTime) Resultat: $($info.LastTaskResult)"
 } catch {
-  throw "Echec creation service ($ServiceName): $($_.Exception.Message)"
+  Write-Host "[appwin-agent] AVIS: impossible de lancer la tache maintenant: $($_.Exception.Message)"
+  Write-Host "[appwin-agent] Redemarrez le PC ou lancez l'agent depuis AppWin (Demarrer agent)."
 }
 
-Start-Sleep -Milliseconds 400
-$serviceKey = Get-Item -Path $envRegPath -ErrorAction SilentlyContinue
-if (-not $serviceKey) {
-  throw "Cle registre service introuvable apres creation ($envRegPath)."
-}
-
-Write-Host "[appwin-agent] Etape 4/5: ecriture des variables d'environnement du service..."
-New-ItemProperty -Path $envRegPath -Name "Environment" -PropertyType MultiString -Value @(
-  "CLOUD_API_URL=$CloudApiUrl"
-  "AGENT_MASTER_TOKEN=$AgentMasterToken"
-  "TERMINAL_ALIAS=$TerminalAlias"
-  "SITE_NAME=$SiteName"
-  "AGENT_POLL_MS=$PollMs"
-) -Force | Out-Null
-
-Write-Host "[appwin-agent] Etape 5/5: demarrage du service..."
-Start-Service -Name $ServiceName
-Get-Service -Name $ServiceName | Select-Object Name, Status, StartType
-Write-Host "[appwin-agent] Termine."
+Write-Host "[appwin-agent] Termine (demarrage auto = tache planifiee, pas service Windows)."
+Get-ScheduledTask -TaskName $taskName | Select-Object TaskName, State

@@ -36,11 +36,19 @@ function appendLog(line) {
 }
 
 function setServiceStatus(statusObj) {
-  if (!statusObj) {
-    els.serviceStatusText.textContent = "Service Windows: non installe";
+  if (!statusObj || statusObj.installed === false) {
+    els.serviceStatusText.textContent =
+      "Demarrage auto: aucune tache planifiee (remplace le service Windows pour eviter l erreur 1053 avec Node.js).";
     return;
   }
-  els.serviceStatusText.textContent = `Service Windows: ${statusObj.Name || "AxiaFlexPrintAgent"} / ${statusObj.Status || "?"} / ${statusObj.StartType || "?"}`;
+  if (statusObj.mode === "task") {
+    const lr = statusObj.lastRunTime ? String(statusObj.lastRunTime) : "—";
+    const lrCode =
+      statusObj.lastTaskResult != null ? String(statusObj.lastTaskResult) : "?";
+    els.serviceStatusText.textContent = `Tache "${statusObj.taskName || "AxiaFlexPrintAgent"}": ${statusObj.state || "?"} | dernier run: ${lr} | code: ${lrCode}`;
+    return;
+  }
+  els.serviceStatusText.textContent = `Statut: ${JSON.stringify(statusObj)}`;
 }
 
 async function refreshServiceStatus() {
@@ -116,8 +124,8 @@ els.installServiceBtn.addEventListener("click", async () => {
   const res = await appWinApi.installService();
   appendLog(
     res?.ok
-      ? `Service installe: ${res.stdout || "OK"}`
-      : `Erreur installation service: ${res?.stderr || res?.stdout || res?.error || "inconnue"}`,
+      ? `Demarrage auto (tache planifiee): ${res.stdout || "OK"}`
+      : `Erreur installation demarrage auto: ${res?.stderr || res?.stdout || res?.error || "inconnue"}`,
   );
   await refreshServiceStatus();
 });
@@ -126,8 +134,8 @@ els.uninstallServiceBtn.addEventListener("click", async () => {
   const res = await appWinApi.uninstallService();
   appendLog(
     res?.ok
-      ? `Service supprime: ${res.stdout || "OK"}`
-      : `Erreur suppression service: ${res?.stderr || res?.stdout || res?.error || "inconnue"}`,
+      ? `Demarrage auto supprime: ${res.stdout || "OK"}`
+      : `Erreur suppression demarrage auto: ${res?.stderr || res?.stdout || res?.error || "inconnue"}`,
   );
   await refreshServiceStatus();
 });
