@@ -98,12 +98,15 @@ set "AGENT_MASTER_TOKEN=$t"
 set "TERMINAL_ALIAS=$a"
 set "SITE_NAME=$sn"
 set "AGENT_POLL_MS=$pm"
+set "AGENT_HOME=%LOCALAPPDATA%\AxiaFlex\AppWinAgent"
+if not exist "%AGENT_HOME%" mkdir "%AGENT_HOME%"
 cd /d "%~dp0"
-"$nodeCmd" "%~dp0agent-worker.js"
+"$nodeCmd" --trace-uncaught "%~dp0agent-worker.js" >> "%AGENT_HOME%\worker.log" 2>&1
 exit /b %ERRORLEVEL%
 "@
 [System.IO.File]::WriteAllText($launchCmd, $bat, [System.Text.Encoding]::ASCII)
 Write-Host "[appwin-agent]   Fichier lancement: $launchCmd"
+Write-Host "[appwin-agent]   Log worker: %LOCALAPPDATA%\AxiaFlex\AppWinAgent\worker.log"
 
 $action = New-ScheduledTaskAction -Execute $launchCmd -WorkingDirectory $agentDir
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name

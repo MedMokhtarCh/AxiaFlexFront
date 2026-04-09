@@ -11,7 +11,8 @@ const MASTER_TOKEN = String(process.env.AGENT_MASTER_TOKEN || "").trim();
 const TERMINAL_ALIAS = String(process.env.TERMINAL_ALIAS || os.hostname()).trim();
 const SITE_NAME = String(process.env.SITE_NAME || "").trim();
 const POLL_MS = Math.max(1500, Number(process.env.AGENT_POLL_MS || 3000));
-const STATE_FILE = path.join(process.cwd(), ".appwin-agent-state.json");
+const AGENT_HOME = path.join(process.env.LOCALAPPDATA || os.tmpdir(), "AxiaFlex", "AppWinAgent");
+const STATE_FILE = path.join(AGENT_HOME, "state.json");
 
 async function ps(command) {
   const { stdout } = await execFileAsync("powershell", [
@@ -34,6 +35,7 @@ async function readState() {
 }
 
 async function writeState(state) {
+  await fs.mkdir(AGENT_HOME, { recursive: true });
   await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2), "utf8");
 }
 
