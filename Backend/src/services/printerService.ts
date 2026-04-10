@@ -368,6 +368,9 @@ const buildReceiptText = (
   paymentMethod?: string,
   amount?: number,
 ) => {
+  const tpl = normalizeTicketTemplate((settings as any)?.clientTicketTemplate);
+  const separator = tpl === 'COMPACT' ? '------------------------' : '------------------------------';
+  const strongSeparator = tpl === 'MODERN' ? '==============================' : '==============================';
   const layout = (settings as any)?.clientTicketLayout || {};
   const show = (key: string, defaultValue = true) =>
     layout?.[key] !== undefined ? Boolean(layout[key]) : defaultValue;
@@ -375,8 +378,9 @@ const buildReceiptText = (
   const footerText = String(layout?.footerText || '').trim();
   const currency = String((settings as any)?.currency || 'DT').trim();
   const lines: string[] = [];
-  lines.push('==============================');
-  lines.push((settings as any)?.restaurantName ? String((settings as any).restaurantName) : '');
+  lines.push(strongSeparator);
+  lines.push((settings as any)?.restaurantName ? String((settings as any).restaurantName) : 'Ticket client');
+  lines.push(tpl === 'MODERN' ? 'Modele: MODERN' : tpl === 'COMPACT' ? 'Modele: COMPACT' : 'Modele: CLASSIC');
   lines.push(headerText || '');
   lines.push(show('showTicketNumber', true) ? `Ticket ${ticket.code}` : '');
   lines.push(order?.ticketNumber ? `Commande ${order.ticketNumber}` : '');
@@ -387,7 +391,7 @@ const buildReceiptText = (
   lines.push(show('showAddress', true) && (settings as any)?.address ? `Adresse: ${String((settings as any).address)}` : '');
   lines.push(show('showPhone', true) && (settings as any)?.phone ? `Tel: ${String((settings as any).phone)}` : '');
   lines.push(show('showTaxId', true) && (settings as any)?.taxId ? `MF: ${String((settings as any).taxId)}` : '');
-  lines.push('------------------------------');
+  lines.push(separator);
   let sum = 0;
   for (const it of items) {
     const qty = Number((it as any).quantity || 0);
@@ -400,7 +404,7 @@ const buildReceiptText = (
       lines.push(`${(it as any).name} x${qty} = ${total.toFixed(3)}`);
     }
   }
-  lines.push('------------------------------');
+  lines.push(separator);
   lines.push(show('showPriceHt', true) ? `Sous-total: ${sum.toFixed(3)} ${currency}` : '');
   lines.push(show('showTicketDiscount', true) && Number((ticket as any)?.discount || 0) > 0
     ? `Remise: -${Number((ticket as any)?.discount || 0).toFixed(3)} ${currency}`
@@ -413,7 +417,7 @@ const buildReceiptText = (
     lines.push(`Règlement: ${amount.toFixed(3)} ${currency} ${paymentMethod ? `(${paymentMethod})` : ''}`);
   }
   lines.push(footerText || '');
-  lines.push('==============================\n');
+  lines.push(`${strongSeparator}\n`);
   return lines.filter(Boolean).join('\n');
 };
 
@@ -694,7 +698,9 @@ export async function printPaymentReceipt(
     Math.min(10, Math.floor(Number((options as any)?.copies || 1))),
   );
   console.info(
-    `[print] clientCopies=${copies} production=1(bar)+1(cuisine) order=${String(
+    `[print] clientCopies=${copies} template=${normalizeTicketTemplate(
+      (settings as any)?.clientTicketTemplate,
+    )} production=1(bar)+1(cuisine) order=${String(
       order?.ticketNumber || order?.id || 'N/A',
     )} printer=${String(printTarget || 'N/A')}`,
   );

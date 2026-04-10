@@ -2564,9 +2564,10 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   }
   async function printTicket(ticketId: string, options?: { copies?: number }) {
+    const configuredCopies = Number(settings.clientTicketPrintCopies || 1);
     const copies = Math.max(
       1,
-      Math.min(10, Math.floor(Number(options?.copies || 1))),
+      Math.min(10, Math.floor(Number(options?.copies ?? configuredCopies))),
     );
     const path = `/pos/tickets/${encodeURIComponent(ticketId)}/print?copies=${copies}`;
     await apiFetch(path, {
