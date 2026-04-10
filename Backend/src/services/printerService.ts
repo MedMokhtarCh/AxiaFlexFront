@@ -609,6 +609,11 @@ export async function printOrderItemsByPrinter(
 			terminalNodeId: (printer as any).terminalNodeId || null,
 			terminalPrinterLocalId: (printer as any).terminalPrinterLocalId || null,
 		});
+		console.info(
+			`[print] production=1 station=${isBar ? 'bar' : 'cuisine'} order=${String(
+				order?.ticketNumber || order?.id || 'N/A',
+			)} printer=${String(printer.name || 'N/A')}`,
+		);
 		printed = true;
 	}
 	if (!printed) {
@@ -634,7 +639,13 @@ export async function printOrderItemsByPrinter(
 	}
 }
 
-export async function printPaymentReceipt(order: any, ticket: Ticket, paymentMethod?: string, amount?: number) {
+export async function printPaymentReceipt(
+  order: any,
+  ticket: Ticket,
+  paymentMethod?: string,
+  amount?: number,
+  options?: { copies?: number },
+) {
   const settings = await getSettings();
   const printerRepo = AppDataSource.getRepository(Printer);
   const tiRepo = AppDataSource.getRepository(TicketItem);
@@ -678,19 +689,30 @@ export async function printPaymentReceipt(order: any, ticket: Ticket, paymentMet
     return;
   }
   const mapped = printers.find((p: any) => String(p.name || '') === String(printTarget || ''));
-  await printText(printTarget, text, {
-    terminalNodeId: (mapped as any)?.terminalNodeId || null,
-    terminalPrinterLocalId: (mapped as any)?.terminalPrinterLocalId || null,
-  });
+  const copies = Math.max(
+    1,
+    Math.min(10, Math.floor(Number((options as any)?.copies || 1))),
+  );
+  console.info(
+    `[print] clientCopies=${copies} production=1(bar)+1(cuisine) order=${String(
+      order?.ticketNumber || order?.id || 'N/A',
+    )} printer=${String(printTarget || 'N/A')}`,
+  );
+  for (let i = 0; i < copies; i += 1) {
+    await printText(printTarget, text, {
+      terminalNodeId: (mapped as any)?.terminalNodeId || null,
+      terminalPrinterLocalId: (mapped as any)?.terminalPrinterLocalId || null,
+    });
+  }
 }
 
-export async function printTicket(ticketId: string) {
+export async function printTicket(ticketId: string, options?: { copies?: number }) {
   const tRepo = AppDataSource.getRepository(Ticket);
   const ticket = await tRepo.findOne({ where: { id: ticketId } as any });
   if (!ticket) return;
   const orderRepo = AppDataSource.getRepository<any>('Order');
   const order = await orderRepo.findOne({ where: { id: (ticket as any).order?.id } as any });
-  await printPaymentReceipt(order, ticket);
+  await printPaymentReceipt(order, ticket, undefined, undefined, options);
 }
 
 /**

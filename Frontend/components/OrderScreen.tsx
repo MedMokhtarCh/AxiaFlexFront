@@ -635,9 +635,7 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
   const printTicketCopies = useCallback(
     async (ticketId: string) => {
       const copies = Math.max(1, Number(settings.clientTicketPrintCopies || 1));
-      for (let i = 0; i < copies; i += 1) {
-        await printTicket(ticketId);
-      }
+      await printTicket(ticketId, { copies });
     },
     [printTicket, settings.clientTicketPrintCopies],
   );

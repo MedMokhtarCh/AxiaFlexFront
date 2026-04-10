@@ -42,7 +42,9 @@ export async function getTicket(req: Request, res: Response) {
 export async function print(req: Request, res: Response) {
   try {
     const id = req.params.id;
-    await printTicket(id);
+    const copiesRaw = Number(req.query?.copies ?? 1);
+    const copies = Math.max(1, Math.min(10, Math.floor(copiesRaw || 1)));
+    await printTicket(id, { copies });
     void logAppAdminAction(req, 'confirm', 'ticket_print', id);
     res.json({ ok: true });
   } catch (e: any) {

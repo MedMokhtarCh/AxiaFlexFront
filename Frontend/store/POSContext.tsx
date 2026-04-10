@@ -1994,7 +1994,7 @@ interface POSContextType {
   // Tickets
   createTicket: (orderId: string, payload: any) => Promise<any>;
   getTicketsByOrder: (orderId: string) => Promise<any>;
-  printTicket: (ticketId: string) => Promise<void>;
+  printTicket: (ticketId: string, options?: { copies?: number }) => Promise<void>;
   /** Ticket client (modèle Paramètres) sans ticket de paiement en base — commande en cours. */
   printOrderClientReceiptProvisional: (orderId: string) => Promise<void>;
   downloadTicketPdf: (ticketId: string) => Promise<void>;
@@ -2563,8 +2563,13 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
       },
     );
   }
-  async function printTicket(ticketId: string) {
-    await apiFetchTypedPath("/pos/tickets/:id/print" as any, { id: ticketId }, {
+  async function printTicket(ticketId: string, options?: { copies?: number }) {
+    const copies = Math.max(
+      1,
+      Math.min(10, Math.floor(Number(options?.copies || 1))),
+    );
+    const path = `/pos/tickets/${encodeURIComponent(ticketId)}/print?copies=${copies}`;
+    await apiFetch(path, {
       method: "POST",
     });
   }
