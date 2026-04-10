@@ -175,6 +175,10 @@ const formatLineWithTemplate = (item: PrintItem, tpl: any) => {
 
 const BAR_KEYWORDS_RE =
   /(eau|coca|cola|fanta|sprite|jus|boisson|soda|cafe|café|the|thé|espresso|capuccino|mojito|biere|bière|vin|canette|cocktail)/i;
+const FOOD_CATEGORY_RE =
+  /(sandwich|burger|pizza|pates|pâtes|plat|grill|menu|food|cuisine|kitchen|snack|wrap|panini|tacos|shawarma)/i;
+const DRINK_CATEGORY_RE =
+  /(drink|boisson|bar|jus|cafe|café|soda|cocktail|eau|cola|the|thé|vin|biere|bière)/i;
 const inferProductionProfile = (item: PrintItem): 'bar' | 'kitchen' => {
   const station = String((item as any)?.station || '')
     .trim()
@@ -183,6 +187,20 @@ const inferProductionProfile = (item: PrintItem): 'bar' | 'kitchen' => {
   if (station === 'KITCHEN') return 'kitchen';
   if (BAR_KEYWORDS_RE.test(String(item?.name || ''))) return 'bar';
   return 'kitchen';
+};
+const inferProductionProfileFromItemAndProduct = (
+  item: PrintItem,
+  product?: any,
+): 'bar' | 'kitchen' => {
+  const station = String((item as any)?.station || '')
+    .trim()
+    .toUpperCase();
+  if (station === 'BAR') return 'bar';
+  if (station === 'KITCHEN') return 'kitchen';
+  const category = String((product as any)?.category || '').trim().toLowerCase();
+  if (DRINK_CATEGORY_RE.test(category)) return 'bar';
+  if (FOOD_CATEGORY_RE.test(category)) return 'kitchen';
+  return inferProductionProfile(item);
 };
 
 const escapePowerShellSingleQuoted = (value: string) =>
@@ -210,6 +228,16 @@ const resolveExternalBarTemplatePath = () =>
   path.join(resolveExternalTemplatesDirectory(), 'bar-ticket-template.txt');
 const resolveExternalKitchenTemplatePath = () =>
   path.join(resolveExternalTemplatesDirectory(), 'kitchen-ticket-template.txt');
+const resolveExternalTemplateCandidate = (basePathTxt: string) => {
+  const baseNoExt = basePathTxt.replace(/\.txt$/i, '');
+  const pdf = `${baseNoExt}.pdf`;
+  const html = `${baseNoExt}.html`;
+  const txt = `${baseNoExt}.txt`;
+  if (existsSync(pdf)) return { path: pdf, kind: 'pdf' as const };
+  if (existsSync(html)) return { path: html, kind: 'html' as const };
+  if (existsSync(txt)) return { path: txt, kind: 'txt' as const };
+  return null;
+};
 const ensureExternalTemplatesDirectory = async () => {
   try {
     await fs.mkdir(resolveExternalTemplatesDirectory(), { recursive: true });
@@ -227,6 +255,14 @@ const renderExternalClientTemplate = (
   }
   return out;
 };
+const htmlToPlainText = (html: string) =>
+  String(html || '')
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\s*\/p\s*>/gi, '\n')
+    .replace(/<\s*\/div\s*>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 const normalizeTicketTemplate = (value: any) => {
   const raw = String(value || 'CLASSIC').trim().toUpperCase();
   if (raw === 'COMPACT' || raw === 'MODERN' || raw === 'CLASSIC') return raw;
@@ -422,6 +458,27 @@ const printPdf = async (
     });
     return;
   }
+  const escapedPath = escapePowerShellSingleQuoted(fullPath);
+  const escapedPrinter = escapePowerShellSingleQuoted(printerName);
+  await execFileAsync('powershell', [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    `Start-Process -FilePath '${escapedPath}' -Verb PrintTo -ArgumentList '${escapedPrinter}' -WindowStyle Hidden`,
+  ]);
+};
+
+const printHtml = async (
+  printerName: string,
+  htmlPath: string,
+  printerMeta?: { terminalNodeId?: string | null; terminalPrinterLocalId?: string | null },
+) => {
+  if (printerMeta?.terminalNodeId) {
+    throw new Error('HTML print is not supported on cloud route');
+  }
+  const fullPath = String(htmlPath || '').trim();
+  if (!fullPath) throw new Error('Missing HTML path');
   const escapedPath = escapePowerShellSingleQuoted(fullPath);
   const escapedPrinter = escapePowerShellSingleQuoted(printerName);
   await execFileAsync('powershell', [
@@ -679,7 +736,7 @@ export async function printOrderItemsByPrinter(
       return pType !== 'RECEIPT';
     });
 		if (!printerIds.length) {
-      const wantedProfile = inferProductionProfile(item);
+      const wantedProfile = inferProductionProfileFromItemAndProduct(item, product);
       const fallbackPrinter = printers.find((p) => {
         const pType = String((p as any).type || '').toUpperCase();
         if (pType === 'RECEIPT') return false;
@@ -727,14 +784,14 @@ export async function printOrderItemsByPrinter(
     ].filter(Boolean);
 		const bodyLines = list.map((it) => formatLineWithTemplate(it, tpl));
     const footerLine = String(tpl?.footerText || '').trim();
-    const externalProductionPath = isBar
-      ? resolveExternalBarTemplatePath()
-      : resolveExternalKitchenTemplatePath();
+    const externalProduction = resolveExternalTemplateCandidate(
+      isBar ? resolveExternalBarTemplatePath() : resolveExternalKitchenTemplatePath(),
+    );
     let text = [...headerLines, ...bodyLines, footerLine, '\n'].filter(Boolean).join('\n');
-    if (existsSync(externalProductionPath)) {
+    if (externalProduction && (externalProduction.kind === 'txt' || externalProduction.kind === 'html')) {
       try {
-        const ext = readFileSync(externalProductionPath, 'utf8');
-        text = renderExternalClientTemplate(String(ext || ''), {
+        const ext = readFileSync(externalProduction.path, 'utf8');
+        const rendered = renderExternalClientTemplate(String(ext || ''), {
           title: String(options?.titleOverride || tpl?.title || (isBar ? 'BON BAR' : 'BON CUISINE')),
           orderNumber: String(order?.ticketNumber || ''),
           orderRef: String(orderRef || ''),
@@ -745,6 +802,10 @@ export async function printOrderItemsByPrinter(
           itemsLines: bodyLines.join('\n'),
           footerText: footerLine,
         });
+        text =
+          externalProduction.kind === 'html'
+            ? htmlToPlainText(rendered)
+            : rendered;
       } catch {
         // keep standard text
       }
@@ -768,15 +829,47 @@ export async function printOrderItemsByPrinter(
       });
     } else {
       try {
-        const pdfPath =
-          productionPdfPath ||
-          (await saveTextAsPdf(`prod-${isBar ? 'bar' : 'kitchen'}`, text, {
-            ticketTemplate: (settings as any)?.clientTicketTemplate,
-          }));
-        await printPdf(printer.name, pdfPath, {
-          terminalNodeId: null,
-          terminalPrinterLocalId: null,
-        });
+        if (externalProduction?.kind === 'pdf') {
+          await printPdf(printer.name, externalProduction.path, {
+            terminalNodeId: null,
+            terminalPrinterLocalId: null,
+          });
+        } else if (externalProduction?.kind === 'html') {
+          const htmlTpl = readFileSync(externalProduction.path, 'utf8');
+          const renderedHtml = renderExternalClientTemplate(String(htmlTpl || ''), {
+            title: String(options?.titleOverride || tpl?.title || (isBar ? 'BON BAR' : 'BON CUISINE')),
+            orderNumber: String(order?.ticketNumber || ''),
+            orderRef: String(orderRef || ''),
+            tableNumber: String(order?.tableNumber || ''),
+            serverName: String(order?.serverName || ''),
+            createdAt: String(new Date(order?.createdAt || Date.now()).toLocaleString()),
+            orderType: String(order?.type || ''),
+            itemsLines: bodyLines.join('\n'),
+            footerText: footerLine,
+          });
+          const htmlPath = path.join(
+            process.cwd(),
+            'tmp',
+            `prod-${isBar ? 'bar' : 'kitchen'}-${Date.now()}.html`,
+          );
+          await fs.mkdir(path.dirname(htmlPath), { recursive: true });
+          await fs.writeFile(htmlPath, renderedHtml, 'utf8');
+          await printHtml(printer.name, htmlPath, {
+            terminalNodeId: null,
+            terminalPrinterLocalId: null,
+          });
+          await fs.unlink(htmlPath).catch(() => undefined);
+        } else {
+          const pdfPath =
+            productionPdfPath ||
+            (await saveTextAsPdf(`prod-${isBar ? 'bar' : 'kitchen'}`, text, {
+              ticketTemplate: (settings as any)?.clientTicketTemplate,
+            }));
+          await printPdf(printer.name, pdfPath, {
+            terminalNodeId: null,
+            terminalPrinterLocalId: null,
+          });
+        }
       } catch {
         await printText(printer.name, text, {
           terminalNodeId: null,
@@ -837,7 +930,10 @@ export async function printPaymentReceipt(
   const baseDir = resolveArchiveBaseDirectory(settings);
   const targetDir = path.join(baseDir, 'tickets_client', methodFolder);
   await fs.mkdir(targetDir, { recursive: true });
-  const externalClientTemplateExists = existsSync(resolveExternalClientTemplatePath());
+  const externalClientTemplate = resolveExternalTemplateCandidate(
+    resolveExternalClientTemplatePath(),
+  );
+  const externalClientTemplateExists = Boolean(externalClientTemplate);
   const pdfPath = externalClientTemplateExists
     ? await saveTextAsPdf('client-ticket-template', text, {
         directory: targetDir,
@@ -895,10 +991,59 @@ export async function printPaymentReceipt(
       continue;
     }
     try {
-      await printPdf(printTarget, pdfPath, {
-        terminalNodeId: null,
-        terminalPrinterLocalId: null,
-      });
+      if (externalClientTemplate?.kind === 'pdf') {
+        await printPdf(printTarget, externalClientTemplate.path, {
+          terminalNodeId: null,
+          terminalPrinterLocalId: null,
+        });
+      } else if (externalClientTemplate?.kind === 'html') {
+        const rawHtml = readFileSync(externalClientTemplate.path, 'utf8');
+        const renderedHtml = renderExternalClientTemplate(String(rawHtml || ''), {
+          restaurantName: String((settings as any)?.restaurantName || ''),
+          headerText: String((settings as any)?.clientTicketLayout?.headerText || ''),
+          footerText: String((settings as any)?.clientTicketLayout?.footerText || ''),
+          ticketCode: String(ticket.code || ''),
+          orderNumber: String(order?.ticketNumber || ''),
+          tableNumber: String(order?.tableNumber || ''),
+          serverName: String(order?.serverName || ''),
+          createdAt: String(new Date(ticket.createdAt || Date.now()).toLocaleString()),
+          address: String((settings as any)?.address || ''),
+          phone: String((settings as any)?.phone || ''),
+          taxId: String((settings as any)?.taxId || ''),
+          itemsLines: items
+            .map((it) => `${(it as any).name} x${Number((it as any).quantity || 0)}`)
+            .join('\n'),
+          subtotal: Number(
+            items.reduce(
+              (acc, it: any) =>
+                acc + Number(it.quantity || 0) * Number(it.unitPrice || 0),
+              0,
+            ),
+          ).toFixed(3),
+          discount: Number((ticket as any)?.discount || 0).toFixed(3),
+          timbre: Number((ticket as any)?.timbre || 0).toFixed(3),
+          total: Number((ticket as any)?.total || 0).toFixed(3),
+          amount: typeof amount === 'number' ? amount.toFixed(3) : '',
+          currency: String((settings as any)?.currency || 'DT'),
+        });
+        const htmlPath = path.join(
+          process.cwd(),
+          'tmp',
+          `client-ticket-${sanitizeFileName(ticketCode, 'ticket')}-${Date.now()}.html`,
+        );
+        await fs.mkdir(path.dirname(htmlPath), { recursive: true });
+        await fs.writeFile(htmlPath, renderedHtml, 'utf8');
+        await printHtml(printTarget, htmlPath, {
+          terminalNodeId: null,
+          terminalPrinterLocalId: null,
+        });
+        await fs.unlink(htmlPath).catch(() => undefined);
+      } else {
+        await printPdf(printTarget, pdfPath, {
+          terminalNodeId: null,
+          terminalPrinterLocalId: null,
+        });
+      }
     } catch {
       await printText(printTarget, text, {
         terminalNodeId: null,

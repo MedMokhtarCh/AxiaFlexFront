@@ -1528,6 +1528,41 @@ const SettingsManager: React.FC = () => {
     }
   };
 
+  const handleDownloadExternalClientHtmlTemplateSample = () => {
+    try {
+      const sample = [
+        "<html>",
+        "  <body style=\"font-family: Arial, sans-serif; font-size: 12px; margin: 8px;\">",
+        "    <h3 style=\"margin: 0 0 6px 0;\">{{restaurantName}}</h3>",
+        "    <div>{{headerText}}</div>",
+        "    <div>Ticket: {{ticketCode}}</div>",
+        "    <div>Commande: {{orderNumber}}</div>",
+        "    <div>Table: {{tableNumber}}</div>",
+        "    <div>Serveur: {{serverName}}</div>",
+        "    <div>Date: {{createdAt}}</div>",
+        "    <hr/>",
+        "    <pre style=\"white-space: pre-wrap; font-family: inherit;\">{{itemsLines}}</pre>",
+        "    <hr/>",
+        "    <div>Sous-total: {{subtotal}} {{currency}}</div>",
+        "    <div>Remise: {{discount}} {{currency}}</div>",
+        "    <div>Timbre: {{timbre}} {{currency}}</div>",
+        "    <div style=\"font-weight: 700;\">Total: {{total}} {{currency}}</div>",
+        "    <div>Règlement: {{amount}} {{currency}}</div>",
+        "    <div style=\"margin-top: 8px;\">{{footerText}}</div>",
+        "  </body>",
+        "</html>",
+        "",
+      ].join("\n");
+      const blob = new Blob([sample], { type: "text/html;charset=utf-8;" });
+      downloadBlob(blob, "client-receipt-template.sample.html");
+      notifySuccess(
+        "Template HTML client téléchargé. Déposez-le dans C:\\ProgramData\\AxiaFlex\\templates\\client-receipt-template.html",
+      );
+    } catch {
+      notifyError("Téléchargement du template HTML client impossible.");
+    }
+  };
+
   const handleDownloadExternalKitchenTemplateSample = () => {
     try {
       const sample = [
@@ -1552,6 +1587,35 @@ const SettingsManager: React.FC = () => {
     }
   };
 
+  const handleDownloadExternalKitchenHtmlTemplateSample = () => {
+    try {
+      const sample = [
+        "<html>",
+        "  <body style=\"font-family: Arial, sans-serif; font-size: 12px; margin: 8px;\">",
+        "    <h3>{{title}}</h3>",
+        "    <div>Commande #{{orderRef}}</div>",
+        "    <div>Type: {{orderType}}</div>",
+        "    <div>Table: {{tableNumber}}</div>",
+        "    <div>Serveur: {{serverName}}</div>",
+        "    <div>Heure: {{createdAt}}</div>",
+        "    <hr/>",
+        "    <pre style=\"white-space: pre-wrap; font-family: inherit;\">{{itemsLines}}</pre>",
+        "    <hr/>",
+        "    <div>{{footerText}}</div>",
+        "  </body>",
+        "</html>",
+        "",
+      ].join("\n");
+      const blob = new Blob([sample], { type: "text/html;charset=utf-8;" });
+      downloadBlob(blob, "kitchen-ticket-template.sample.html");
+      notifySuccess(
+        "Template HTML cuisine téléchargé. Déposez-le dans C:\\ProgramData\\AxiaFlex\\templates\\kitchen-ticket-template.html",
+      );
+    } catch {
+      notifyError("Téléchargement du template HTML cuisine impossible.");
+    }
+  };
+
   const handleDownloadExternalBarTemplateSample = () => {
     try {
       const sample = [
@@ -1573,6 +1637,35 @@ const SettingsManager: React.FC = () => {
       );
     } catch {
       notifyError("Téléchargement du modèle bar impossible.");
+    }
+  };
+
+  const handleDownloadExternalBarHtmlTemplateSample = () => {
+    try {
+      const sample = [
+        "<html>",
+        "  <body style=\"font-family: Arial, sans-serif; font-size: 12px; margin: 8px;\">",
+        "    <h3>{{title}}</h3>",
+        "    <div>Commande #{{orderRef}}</div>",
+        "    <div>Type: {{orderType}}</div>",
+        "    <div>Table: {{tableNumber}}</div>",
+        "    <div>Serveur: {{serverName}}</div>",
+        "    <div>Heure: {{createdAt}}</div>",
+        "    <hr/>",
+        "    <pre style=\"white-space: pre-wrap; font-family: inherit;\">{{itemsLines}}</pre>",
+        "    <hr/>",
+        "    <div>{{footerText}}</div>",
+        "  </body>",
+        "</html>",
+        "",
+      ].join("\n");
+      const blob = new Blob([sample], { type: "text/html;charset=utf-8;" });
+      downloadBlob(blob, "bar-ticket-template.sample.html");
+      notifySuccess(
+        "Template HTML bar téléchargé. Déposez-le dans C:\\ProgramData\\AxiaFlex\\templates\\bar-ticket-template.html",
+      );
+    } catch {
+      notifyError("Téléchargement du template HTML bar impossible.");
     }
   };
 
@@ -2707,7 +2800,7 @@ const SettingsManager: React.FC = () => {
                       </label>
                     ))}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 pt-1">
                     <button
                       type="button"
                       onClick={handleExportTicketTemplate}
@@ -2731,6 +2824,14 @@ const SettingsManager: React.FC = () => {
                     >
                       <Download size={12} />
                       Modèle C:
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadExternalClientHtmlTemplateSample}
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-blue-50 text-blue-700 border border-blue-100 text-[10px] font-black uppercase tracking-wider hover:bg-blue-100"
+                    >
+                      <Download size={12} />
+                      HTML client
                     </button>
                     <input
                       ref={ticketTemplateImportRef}
@@ -2889,7 +2990,7 @@ const SettingsManager: React.FC = () => {
                   <p className="text-[10px] font-black text-slate-600 uppercase">
                     Modèle impression production (Cuisine / Bar)
                   </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                     <button
                       type="button"
                       onClick={handleDownloadExternalKitchenTemplateSample}
@@ -2900,11 +3001,27 @@ const SettingsManager: React.FC = () => {
                     </button>
                     <button
                       type="button"
+                      onClick={handleDownloadExternalKitchenHtmlTemplateSample}
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-blue-50 text-blue-700 border border-blue-100 text-[10px] font-black uppercase tracking-wider hover:bg-blue-100"
+                    >
+                      <Download size={12} />
+                      HTML Cuisine
+                    </button>
+                    <button
+                      type="button"
                       onClick={handleDownloadExternalBarTemplateSample}
                       className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-cyan-50 text-cyan-700 border border-cyan-100 text-[10px] font-black uppercase tracking-wider hover:bg-cyan-100"
                     >
                       <Download size={12} />
                       Modèle C: Bar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadExternalBarHtmlTemplateSample}
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-blue-50 text-blue-700 border border-blue-100 text-[10px] font-black uppercase tracking-wider hover:bg-blue-100"
+                    >
+                      <Download size={12} />
+                      HTML Bar
                     </button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
