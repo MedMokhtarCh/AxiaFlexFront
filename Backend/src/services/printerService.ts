@@ -173,6 +173,18 @@ const formatLineWithTemplate = (item: PrintItem, tpl: any) => {
 	return `- ${name}${qtyText}${notesText}`;
 };
 
+const BAR_KEYWORDS_RE =
+  /(eau|coca|cola|fanta|sprite|jus|boisson|soda|cafe|café|the|thé|espresso|capuccino|mojito|biere|bière|vin|canette|cocktail)/i;
+const inferProductionProfile = (item: PrintItem): 'bar' | 'kitchen' => {
+  const station = String((item as any)?.station || '')
+    .trim()
+    .toUpperCase();
+  if (station === 'BAR') return 'bar';
+  if (station === 'KITCHEN') return 'kitchen';
+  if (BAR_KEYWORDS_RE.test(String(item?.name || ''))) return 'bar';
+  return 'kitchen';
+};
+
 const escapePowerShellSingleQuoted = (value: string) =>
 	String(value || '').replace(/'/g, "''");
 const sanitizeFileName = (value: string, fallback = 'receipt') => {
@@ -667,9 +679,7 @@ export async function printOrderItemsByPrinter(
       return pType !== 'RECEIPT';
     });
 		if (!printerIds.length) {
-      const station = String((item as any)?.station || '').trim().toUpperCase();
-      const wantedProfile = station === 'BAR' ? 'bar' : station === 'KITCHEN' ? 'kitchen' : '';
-      if (!wantedProfile) return;
+      const wantedProfile = inferProductionProfile(item);
       const fallbackPrinter = printers.find((p) => {
         const pType = String((p as any).type || '').toUpperCase();
         if (pType === 'RECEIPT') return false;
@@ -739,9 +749,10 @@ export async function printOrderItemsByPrinter(
         // keep standard text
       }
     }
+    let productionPdfPath: string | null = null;
     try {
       const stationFolder = isBar ? 'bar' : 'cuisine';
-      await saveCategorizedPdf({
+      productionPdfPath = await saveCategorizedPdf({
         categoryPath: ['tickets_preparation', stationFolder],
         prefix: `${stationFolder}-${String(order?.ticketNumber || order?.id || 'commande')}`,
         text,
@@ -749,10 +760,30 @@ export async function printOrderItemsByPrinter(
         ticketTemplate: (settings as any)?.clientTicketTemplate,
       });
     } catch {}
-		await printText(printer.name, text, {
-			terminalNodeId: (printer as any).terminalNodeId || null,
-			terminalPrinterLocalId: (printer as any).terminalPrinterLocalId || null,
-		});
+    const isCloudRoute = Boolean((printer as any)?.terminalNodeId);
+    if (isCloudRoute) {
+      await printText(printer.name, text, {
+        terminalNodeId: (printer as any).terminalNodeId || null,
+        terminalPrinterLocalId: (printer as any).terminalPrinterLocalId || null,
+      });
+    } else {
+      try {
+        const pdfPath =
+          productionPdfPath ||
+          (await saveTextAsPdf(`prod-${isBar ? 'bar' : 'kitchen'}`, text, {
+            ticketTemplate: (settings as any)?.clientTicketTemplate,
+          }));
+        await printPdf(printer.name, pdfPath, {
+          terminalNodeId: null,
+          terminalPrinterLocalId: null,
+        });
+      } catch {
+        await printText(printer.name, text, {
+          terminalNodeId: null,
+          terminalPrinterLocalId: null,
+        });
+      }
+    }
 		console.info(
 			`[print] production=1 station=${isBar ? 'bar' : 'cuisine'} order=${String(
 				order?.ticketNumber || order?.id || 'N/A',
