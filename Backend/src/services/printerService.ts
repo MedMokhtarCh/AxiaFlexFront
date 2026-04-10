@@ -810,17 +810,14 @@ export async function printOrderItemsByPrinter(
         // keep standard text
       }
     }
-    let productionPdfPath: string | null = null;
-    try {
-      const stationFolder = isBar ? 'bar' : 'cuisine';
-      productionPdfPath = await saveCategorizedPdf({
-        categoryPath: ['tickets_preparation', stationFolder],
-        prefix: `${stationFolder}-${String(order?.ticketNumber || order?.id || 'commande')}`,
-        text,
-        fixedFileName: `${String(order?.ticketNumber || order?.id || 'commande')}-${stationFolder}-${Date.now()}`,
-        ticketTemplate: (settings as any)?.clientTicketTemplate,
-      });
-    } catch {}
+    const stationFolder = isBar ? 'bar' : 'cuisine';
+    void saveCategorizedPdf({
+      categoryPath: ['tickets_preparation', stationFolder],
+      prefix: `${stationFolder}-${String(order?.ticketNumber || order?.id || 'commande')}`,
+      text,
+      fixedFileName: `${String(order?.ticketNumber || order?.id || 'commande')}-${stationFolder}-${Date.now()}`,
+      ticketTemplate: (settings as any)?.clientTicketTemplate,
+    }).catch(() => undefined);
     const isCloudRoute = Boolean((printer as any)?.terminalNodeId);
     if (isCloudRoute) {
       await printText(printer.name, text, {
@@ -860,12 +857,8 @@ export async function printOrderItemsByPrinter(
           });
           await fs.unlink(htmlPath).catch(() => undefined);
         } else {
-          const pdfPath =
-            productionPdfPath ||
-            (await saveTextAsPdf(`prod-${isBar ? 'bar' : 'kitchen'}`, text, {
-              ticketTemplate: (settings as any)?.clientTicketTemplate,
-            }));
-          await printPdf(printer.name, pdfPath, {
+          // Fast path: print immediately on thermal queue.
+          await printText(printer.name, text, {
             terminalNodeId: null,
             terminalPrinterLocalId: null,
           });
@@ -933,34 +926,6 @@ export async function printPaymentReceipt(
   const externalClientTemplate = resolveExternalTemplateCandidate(
     resolveExternalClientTemplatePath(),
   );
-  const externalClientTemplateExists = Boolean(externalClientTemplate);
-  const pdfPath = externalClientTemplateExists
-    ? await saveTextAsPdf('client-ticket-template', text, {
-        directory: targetDir,
-        fixedFileName: sanitizeFileName(ticketCode, 'ticket'),
-        ticketTemplate: (settings as any)?.clientTicketTemplate,
-      })
-    : path.join(targetDir, `${sanitizeFileName(ticketCode, 'ticket')}.pdf`);
-  if (!externalClientTemplateExists) {
-    const style = getPdfTemplateStyle((settings as any)?.clientTicketTemplate);
-    await new Promise<void>((resolve, reject) => {
-      const doc = new (PDFDocument as any)({ size: style.size, margin: style.margin });
-      const stream = createWriteStream(pdfPath);
-      stream.on('finish', () => resolve());
-      stream.on('error', reject);
-      (doc as any).on('error', reject);
-      (doc as any).pipe(stream);
-      renderReceiptPdfDocument(doc, settings, order, ticket, items, paymentMethod, amount);
-      (doc as any).end();
-    });
-  }
-  const savedPdf = pdfPath;
-  await savePdfArchiveFromFile({
-    category: 'tickets_client',
-    relativePath: path.relative(baseDir, pdfPath),
-    absolutePath: pdfPath,
-  }).catch(() => undefined);
-  console.info(`[print] Reçu PDF sauvegardé: ${savedPdf}`);
   const assignedName = await resolvePhysicalPrinterNameForOrderServer(order);
   const printTarget = assignedName || receipt?.name;
   if (!printTarget) {
@@ -1039,7 +1004,7 @@ export async function printPaymentReceipt(
         });
         await fs.unlink(htmlPath).catch(() => undefined);
       } else {
-        await printPdf(printTarget, pdfPath, {
+        await printText(printTarget, text, {
           terminalNodeId: null,
           terminalPrinterLocalId: null,
         });
@@ -1051,6 +1016,27 @@ export async function printPaymentReceipt(
       });
     }
   }
+  // Archive PDF in background to avoid delaying thermal output.
+  void (async () => {
+    const pdfPath = path.join(targetDir, `${sanitizeFileName(ticketCode, 'ticket')}.pdf`);
+    const style = getPdfTemplateStyle((settings as any)?.clientTicketTemplate);
+    await new Promise<void>((resolve, reject) => {
+      const doc = new (PDFDocument as any)({ size: style.size, margin: style.margin });
+      const stream = createWriteStream(pdfPath);
+      stream.on('finish', () => resolve());
+      stream.on('error', reject);
+      (doc as any).on('error', reject);
+      (doc as any).pipe(stream);
+      renderReceiptPdfDocument(doc, settings, order, ticket, items, paymentMethod, amount);
+      (doc as any).end();
+    });
+    await savePdfArchiveFromFile({
+      category: 'tickets_client',
+      relativePath: path.relative(baseDir, pdfPath),
+      absolutePath: pdfPath,
+    }).catch(() => undefined);
+    console.info(`[print] Reçu PDF sauvegardé: ${pdfPath}`);
+  })().catch(() => undefined);
 }
 
 export async function printTicket(ticketId: string, options?: { copies?: number }) {

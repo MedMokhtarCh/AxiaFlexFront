@@ -10,7 +10,7 @@ const API_BASE = String(process.env.CLOUD_API_URL || "").replace(/\/$/, "");
 const MASTER_TOKEN = String(process.env.AGENT_MASTER_TOKEN || "").trim();
 const TERMINAL_ALIAS = String(process.env.TERMINAL_ALIAS || os.hostname()).trim();
 const SITE_NAME = String(process.env.SITE_NAME || "").trim();
-const POLL_MS = Math.max(1500, Number(process.env.AGENT_POLL_MS || 3000));
+const POLL_MS = Math.max(500, Number(process.env.AGENT_POLL_MS || 1000));
 const AGENT_HOME = path.join(process.env.LOCALAPPDATA || os.tmpdir(), "AxiaFlex", "AppWinAgent");
 const STATE_FILE = path.join(AGENT_HOME, "state.json");
 
@@ -219,8 +219,9 @@ async function loop() {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
+      await processJobs(token);
       const now = Date.now();
-      if (now - lastInventory > 15000) {
+      if (now - lastInventory > 60000) {
         const printers = await detectPrinters();
         await cloudFetch("/pos/agent/printers", {
           method: "POST",
@@ -229,7 +230,6 @@ async function loop() {
         });
         lastInventory = now;
       }
-      await processJobs(token);
     } catch (e) {
       const msg = messageFromError(e);
       console.error("[appwin-agent] cycle error:", msg);
