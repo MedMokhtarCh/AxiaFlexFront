@@ -201,45 +201,28 @@ export async function createOrder(body: any) {
     const repo = manager.getRepository(Order);
     const { items: _incomingItems, ...rest } = body || {};
 
-    // Reuse existing open order for same context to avoid duplicates
-    let createdOrder = await repo.findOne({
-      where: {
-        status: 'PENDING',
-        terminalId: terminalId || null,
-        tableNumber: rest?.tableNumber || null,
-        zoneId: rest?.zoneId || null,
-        type: rest?.type || null,
-        serverId: rest?.serverId || null,
-      } as any,
-    });
-
-    if (!createdOrder) {
-      await assertOrderQuota();
-      const ticketNumber = await generateNextTicketNumber(manager);
-      const newOrder = repo.create({
-        ...rest,
-        terminalId: terminalId || null,
-        ticketNumber,
-        createdAt: Date.now(),
-        status: body?.status || 'PENDING',
-        total: parseNumeric(body?.total),
-        discount: parseNumeric(body?.discount),
-        timbre: parseNumeric(body?.timbre),
-        tableNumber: body?.tableNumber || null,
-        zoneId: body?.zoneId || null,
-        type: body?.type || null,
-        serverName: body?.serverName || null,
-        serverId: body?.serverId || null,
-        shiftId: body?.shiftId || null,
-        paidAmount: parseNumeric(body?.paidAmount),
-        payments: body?.payments || [],
-        clientDisplayName: normText(body?.clientDisplayName) || null,
-      } as any);
-      createdOrder = await repo.save(newOrder as any);
-    } else if (body && 'clientDisplayName' in body) {
-      (createdOrder as any).clientDisplayName = normText(body?.clientDisplayName) || null;
-      createdOrder = await repo.save(createdOrder as any);
-    }
+    await assertOrderQuota();
+    const ticketNumber = await generateNextTicketNumber(manager);
+    const newOrder = repo.create({
+      ...rest,
+      terminalId: terminalId || null,
+      ticketNumber,
+      createdAt: Date.now(),
+      status: body?.status || 'PENDING',
+      total: parseNumeric(body?.total),
+      discount: parseNumeric(body?.discount),
+      timbre: parseNumeric(body?.timbre),
+      tableNumber: body?.tableNumber || null,
+      zoneId: body?.zoneId || null,
+      type: body?.type || null,
+      serverName: body?.serverName || null,
+      serverId: body?.serverId || null,
+      shiftId: body?.shiftId || null,
+      paidAmount: parseNumeric(body?.paidAmount),
+      payments: body?.payments || [],
+      clientDisplayName: normText(body?.clientDisplayName) || null,
+    } as any);
+    const createdOrder = await repo.save(newOrder as any);
 
     const itemsRepo = manager.getRepository(OrderItem);
     const orderItems = Array.isArray(_incomingItems) ? _incomingItems : [];

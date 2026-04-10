@@ -119,6 +119,25 @@ async function printRawText(printerName, text) {
   }
 }
 
+async function printPdfBase64(printerName, pdfBase64) {
+  const tmp = path.join(os.tmpdir(), `axiaflex-print-${Date.now()}.pdf`);
+  const data = Buffer.from(String(pdfBase64 || ""), "base64");
+  await fs.writeFile(tmp, data);
+  try {
+    const escapedPath = String(tmp).replace(/'/g, "''");
+    const escapedPrinter = String(printerName || "").replace(/'/g, "''");
+    await execFileAsync("powershell", [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      `Start-Process -FilePath '${escapedPath}' -Verb PrintTo -ArgumentList '${escapedPrinter}' -WindowStyle Hidden`,
+    ]);
+  } finally {
+    await fs.unlink(tmp).catch(() => undefined);
+  }
+}
+
 async function resolvePrinterNameForJob(job, payload) {
   const targetLocalId = String(
     job?.targetPrinterLocalId || payload?.printerLocalId || "",
@@ -150,12 +169,16 @@ async function processJobs(token) {
     let error = null;
     try {
       const payload = j?.payload || {};
-      if (String(payload.type || "") !== "RAW_TEXT_PRINT") {
-        throw new Error("Unsupported job payload type");
-      }
       const printerName = await resolvePrinterNameForJob(j, payload);
       if (!printerName) throw new Error("Missing printerName");
-      await printRawText(printerName, String(payload.text || ""));
+      const type = String(payload.type || "");
+      if (type === "RAW_TEXT_PRINT") {
+        await printRawText(printerName, String(payload.text || ""));
+      } else if (type === "PDF_PRINT") {
+        await printPdfBase64(printerName, String(payload.pdfBase64 || ""));
+      } else {
+        throw new Error("Unsupported job payload type");
+      }
     } catch (e) {
       ok = false;
       error = e instanceof Error ? e.message : "print failed";

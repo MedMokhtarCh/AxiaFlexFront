@@ -360,6 +360,40 @@ const printText = async (
 	}
 };
 
+const printPdf = async (
+  printerName: string,
+  pdfPath: string,
+  printerMeta?: { terminalNodeId?: string | null; terminalPrinterLocalId?: string | null },
+) => {
+  const fullPath = String(pdfPath || '').trim();
+  if (!fullPath) throw new Error('Missing PDF path');
+  if (printerMeta?.terminalNodeId) {
+    const raw = await fs.readFile(fullPath);
+    await enqueuePrintJob({
+      terminalNodeId: String(printerMeta.terminalNodeId),
+      printerLocalId: printerMeta.terminalPrinterLocalId || null,
+      printerName: printerName || null,
+      payload: {
+        type: 'PDF_PRINT',
+        printerName,
+        fileName: path.basename(fullPath),
+        pdfBase64: raw.toString('base64'),
+      },
+      maxRetries: 3,
+    });
+    return;
+  }
+  const escapedPath = escapePowerShellSingleQuoted(fullPath);
+  const escapedPrinter = escapePowerShellSingleQuoted(printerName);
+  await execFileAsync('powershell', [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    `Start-Process -FilePath '${escapedPath}' -Verb PrintTo -ArgumentList '${escapedPrinter}' -WindowStyle Hidden`,
+  ]);
+};
+
 const buildReceiptText = (
   settings: any,
   order: any,
@@ -711,10 +745,17 @@ export async function printPaymentReceipt(
     )} printer=${String(printTarget || 'N/A')}`,
   );
   for (let i = 0; i < copies; i += 1) {
-    await printText(printTarget, text, {
-      terminalNodeId: (mapped as any)?.terminalNodeId || null,
-      terminalPrinterLocalId: (mapped as any)?.terminalPrinterLocalId || null,
-    });
+    try {
+      await printPdf(printTarget, pdfPath, {
+        terminalNodeId: (mapped as any)?.terminalNodeId || null,
+        terminalPrinterLocalId: (mapped as any)?.terminalPrinterLocalId || null,
+      });
+    } catch {
+      await printText(printTarget, text, {
+        terminalNodeId: (mapped as any)?.terminalNodeId || null,
+        terminalPrinterLocalId: (mapped as any)?.terminalPrinterLocalId || null,
+      });
+    }
   }
 }
 
