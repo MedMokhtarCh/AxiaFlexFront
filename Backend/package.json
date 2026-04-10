@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "postinstall": "node ./scripts/postinstall-fix-es-errors.cjs",
     "start": "node dist/index.js",
     "build": "tsc -p .",
     "db:init": "tsx src/scripts/initDeploymentDb.ts",
