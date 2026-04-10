@@ -188,10 +188,23 @@ const sanitizeFileName = (value: string, fallback = 'receipt') => {
 const resolveArchiveBaseDirectory = (settings: any) =>
   String(settings?.receiptPdfDirectory || '').trim() ||
   path.join(process.cwd(), 'tmp', 'pdf-archives');
-const resolveExternalClientTemplatePath = () =>
+const resolveExternalTemplatesDirectory = () =>
   process.platform === 'win32'
-    ? 'C:\\ProgramData\\AxiaFlex\\templates\\client-receipt-template.txt'
-    : '/var/lib/axiaflex/templates/client-receipt-template.txt';
+    ? 'C:\\ProgramData\\AxiaFlex\\templates'
+    : '/var/lib/axiaflex/templates';
+const resolveExternalClientTemplatePath = () =>
+  path.join(resolveExternalTemplatesDirectory(), 'client-receipt-template.txt');
+const resolveExternalBarTemplatePath = () =>
+  path.join(resolveExternalTemplatesDirectory(), 'bar-ticket-template.txt');
+const resolveExternalKitchenTemplatePath = () =>
+  path.join(resolveExternalTemplatesDirectory(), 'kitchen-ticket-template.txt');
+const ensureExternalTemplatesDirectory = async () => {
+  try {
+    await fs.mkdir(resolveExternalTemplatesDirectory(), { recursive: true });
+  } catch {
+    // ignore: fallback templates remain available
+  }
+};
 const renderExternalClientTemplate = (
   templateText: string,
   data: Record<string, string>,
@@ -620,6 +633,7 @@ export async function printOrderItemsByPrinter(
 	order: any,
 	options?: { titleOverride?: string },
 ) {
+	await ensureExternalTemplatesDirectory();
 	const items: PrintItem[] = Array.isArray(order?.items) ? order.items : [];
 	if (!items.length) return;
 
@@ -643,9 +657,15 @@ export async function printOrderItemsByPrinter(
 	items.forEach((item) => {
 		if (!item.productId) return;
 		const product = productById.get(item.productId);
-		const printerIds = Array.isArray(product?.printerIds)
+		const rawPrinterIds = Array.isArray(product?.printerIds)
 			? product?.printerIds
 			: [];
+    const printerIds = rawPrinterIds.filter((pid) => {
+      const p = printersById.get(String(pid));
+      if (!p) return false;
+      const pType = String((p as any).type || '').toUpperCase();
+      return pType !== 'RECEIPT';
+    });
 		if (!printerIds.length) {
       const station = String((item as any)?.station || '').trim().toUpperCase();
       const wantedProfile = station === 'BAR' ? 'bar' : station === 'KITCHEN' ? 'kitchen' : '';
@@ -697,7 +717,28 @@ export async function printOrderItemsByPrinter(
     ].filter(Boolean);
 		const bodyLines = list.map((it) => formatLineWithTemplate(it, tpl));
     const footerLine = String(tpl?.footerText || '').trim();
-		const text = [...headerLines, ...bodyLines, footerLine, '\n'].filter(Boolean).join('\n');
+    const externalProductionPath = isBar
+      ? resolveExternalBarTemplatePath()
+      : resolveExternalKitchenTemplatePath();
+    let text = [...headerLines, ...bodyLines, footerLine, '\n'].filter(Boolean).join('\n');
+    if (existsSync(externalProductionPath)) {
+      try {
+        const ext = readFileSync(externalProductionPath, 'utf8');
+        text = renderExternalClientTemplate(String(ext || ''), {
+          title: String(options?.titleOverride || tpl?.title || (isBar ? 'BON BAR' : 'BON CUISINE')),
+          orderNumber: String(order?.ticketNumber || ''),
+          orderRef: String(orderRef || ''),
+          tableNumber: String(order?.tableNumber || ''),
+          serverName: String(order?.serverName || ''),
+          createdAt: String(new Date(order?.createdAt || Date.now()).toLocaleString()),
+          orderType: String(order?.type || ''),
+          itemsLines: bodyLines.join('\n'),
+          footerText: footerLine,
+        });
+      } catch {
+        // keep standard text
+      }
+    }
     try {
       const stationFolder = isBar ? 'bar' : 'cuisine';
       await saveCategorizedPdf({
@@ -749,6 +790,7 @@ export async function printPaymentReceipt(
   amount?: number,
   options?: { copies?: number },
 ) {
+  await ensureExternalTemplatesDirectory();
   const settings = await getSettings();
   const printerRepo = AppDataSource.getRepository(Printer);
   const tiRepo = AppDataSource.getRepository(TicketItem);
@@ -764,18 +806,27 @@ export async function printPaymentReceipt(
   const baseDir = resolveArchiveBaseDirectory(settings);
   const targetDir = path.join(baseDir, 'tickets_client', methodFolder);
   await fs.mkdir(targetDir, { recursive: true });
-  const pdfPath = path.join(targetDir, `${sanitizeFileName(ticketCode, 'ticket')}.pdf`);
-  const style = getPdfTemplateStyle((settings as any)?.clientTicketTemplate);
-  await new Promise<void>((resolve, reject) => {
-    const doc = new (PDFDocument as any)({ size: style.size, margin: style.margin });
-    const stream = createWriteStream(pdfPath);
-    stream.on('finish', () => resolve());
-    stream.on('error', reject);
-    (doc as any).on('error', reject);
-    (doc as any).pipe(stream);
-    renderReceiptPdfDocument(doc, settings, order, ticket, items, paymentMethod, amount);
-    (doc as any).end();
-  });
+  const externalClientTemplateExists = existsSync(resolveExternalClientTemplatePath());
+  const pdfPath = externalClientTemplateExists
+    ? await saveTextAsPdf('client-ticket-template', text, {
+        directory: targetDir,
+        fixedFileName: sanitizeFileName(ticketCode, 'ticket'),
+        ticketTemplate: (settings as any)?.clientTicketTemplate,
+      })
+    : path.join(targetDir, `${sanitizeFileName(ticketCode, 'ticket')}.pdf`);
+  if (!externalClientTemplateExists) {
+    const style = getPdfTemplateStyle((settings as any)?.clientTicketTemplate);
+    await new Promise<void>((resolve, reject) => {
+      const doc = new (PDFDocument as any)({ size: style.size, margin: style.margin });
+      const stream = createWriteStream(pdfPath);
+      stream.on('finish', () => resolve());
+      stream.on('error', reject);
+      (doc as any).on('error', reject);
+      (doc as any).pipe(stream);
+      renderReceiptPdfDocument(doc, settings, order, ticket, items, paymentMethod, amount);
+      (doc as any).end();
+    });
+  }
   const savedPdf = pdfPath;
   await savePdfArchiveFromFile({
     category: 'tickets_client',
