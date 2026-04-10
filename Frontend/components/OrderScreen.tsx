@@ -687,6 +687,7 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
         orderId = await createOrder({
           ...orderData,
           status: "PENDING" as any,
+          print: true,
           ...fastFoodClientExtras(),
         });
       }

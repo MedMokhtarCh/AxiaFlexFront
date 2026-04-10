@@ -509,10 +509,16 @@ const renderReceiptPdfDocument = (
 export async function getTicketPdfBuffer(ticketId: string) {
   const settings = await getSettings();
   const tRepo = AppDataSource.getRepository(Ticket);
-  const ticket = await tRepo.findOne({ where: { id: ticketId } as any });
+  const ticket = await tRepo.findOne({
+    where: { id: ticketId } as any,
+    relations: ['order'] as any,
+  });
   if (!ticket) throw new Error('Ticket not found');
   const orderRepo = AppDataSource.getRepository<any>('Order');
-  const order = await orderRepo.findOne({ where: { id: (ticket as any).order?.id } as any });
+  const linkedOrderId = String((ticket as any)?.order?.id || '').trim();
+  const order = linkedOrderId
+    ? await orderRepo.findOne({ where: { id: linkedOrderId } as any })
+    : null;
   const tiRepo = AppDataSource.getRepository(TicketItem);
   const items = await tiRepo.find({ where: { ticket: { id: ticket.id } } as any });
   const style = getPdfTemplateStyle((settings as any)?.clientTicketTemplate);
@@ -714,10 +720,19 @@ export async function printPaymentReceipt(
 
 export async function printTicket(ticketId: string, options?: { copies?: number }) {
   const tRepo = AppDataSource.getRepository(Ticket);
-  const ticket = await tRepo.findOne({ where: { id: ticketId } as any });
+  const ticket = await tRepo.findOne({
+    where: { id: ticketId } as any,
+    relations: ['order'] as any,
+  });
   if (!ticket) return;
   const orderRepo = AppDataSource.getRepository<any>('Order');
-  const order = await orderRepo.findOne({ where: { id: (ticket as any).order?.id } as any });
+  const linkedOrderId = String((ticket as any)?.order?.id || '').trim();
+  const order = linkedOrderId
+    ? await orderRepo.findOne({ where: { id: linkedOrderId } as any })
+    : null;
+  if (!order) {
+    throw new Error('Order not found for ticket');
+  }
   await printPaymentReceipt(order, ticket, undefined, undefined, options);
 }
 
