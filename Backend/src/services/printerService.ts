@@ -930,7 +930,7 @@ export async function printPaymentReceipt(
   const printTarget = assignedName || receipt?.name;
   if (!printTarget) {
     console.warn(
-      `[print] Aucune imprimante : ni affectation serveur, ni imprimante caisse globale. PDF: ${savedPdf}`,
+      `[print] Aucune imprimante : ni affectation serveur, ni imprimante caisse globale. Dossier archive: ${targetDir}`,
     );
     return;
   }
