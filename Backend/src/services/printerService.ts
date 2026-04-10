@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import PDFDocument from 'pdfkit';
 import { AppDataSource } from '../data-source.js';
@@ -188,6 +188,20 @@ const sanitizeFileName = (value: string, fallback = 'receipt') => {
 const resolveArchiveBaseDirectory = (settings: any) =>
   String(settings?.receiptPdfDirectory || '').trim() ||
   path.join(process.cwd(), 'tmp', 'pdf-archives');
+const resolveExternalClientTemplatePath = () =>
+  process.platform === 'win32'
+    ? 'C:\\ProgramData\\AxiaFlex\\templates\\client-receipt-template.txt'
+    : '/var/lib/axiaflex/templates/client-receipt-template.txt';
+const renderExternalClientTemplate = (
+  templateText: string,
+  data: Record<string, string>,
+) => {
+  let out = String(templateText || '');
+  for (const [key, value] of Object.entries(data)) {
+    out = out.replace(new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g'), String(value || ''));
+  }
+  return out;
+};
 const normalizeTicketTemplate = (value: any) => {
   const raw = String(value || 'CLASSIC').trim().toUpperCase();
   if (raw === 'COMPACT' || raw === 'MODERN' || raw === 'CLASSIC') return raw;
@@ -402,15 +416,57 @@ const buildReceiptText = (
   paymentMethod?: string,
   amount?: number,
 ) => {
-  const tpl = normalizeTicketTemplate((settings as any)?.clientTicketTemplate);
-  const separator = tpl === 'COMPACT' ? '------------------------' : '------------------------------';
-  const strongSeparator = tpl === 'MODERN' ? '==============================' : '==============================';
   const layout = (settings as any)?.clientTicketLayout || {};
   const show = (key: string, defaultValue = true) =>
     layout?.[key] !== undefined ? Boolean(layout[key]) : defaultValue;
   const headerText = String(layout?.headerText || '').trim();
   const footerText = String(layout?.footerText || '').trim();
   const currency = String((settings as any)?.currency || 'DT').trim();
+  const createdAt = new Date(ticket.createdAt || Date.now()).toLocaleString();
+  const externalPath = resolveExternalClientTemplatePath();
+  let sum = 0;
+  const itemRows: string[] = [];
+  for (const it of items) {
+    const qty = Number((it as any).quantity || 0);
+    const price = Number((it as any).unitPrice || 0);
+    const total = qty * price;
+    sum += total;
+    if (show('showItemUnitPrice', true)) {
+      itemRows.push(`${(it as any).name} x${qty} @ ${price.toFixed(3)} = ${total.toFixed(3)}`);
+    } else {
+      itemRows.push(`${(it as any).name} x${qty} = ${total.toFixed(3)}`);
+    }
+  }
+  if (existsSync(externalPath)) {
+    try {
+      const tpl = readFileSync(externalPath, 'utf8');
+      return renderExternalClientTemplate(String(tpl || ''), {
+        restaurantName: String((settings as any)?.restaurantName || ''),
+        headerText,
+        footerText,
+        ticketCode: String(ticket.code || ''),
+        orderNumber: String(order?.ticketNumber || ''),
+        tableNumber: String(order?.tableNumber || ''),
+        serverName: String(order?.serverName || ''),
+        createdAt,
+        address: String((settings as any)?.address || ''),
+        phone: String((settings as any)?.phone || ''),
+        taxId: String((settings as any)?.taxId || ''),
+        itemsLines: itemRows.join('\n'),
+        subtotal: sum.toFixed(3),
+        discount: Number((ticket as any)?.discount || 0).toFixed(3),
+        timbre: Number((ticket as any)?.timbre || 0).toFixed(3),
+        total: Number((ticket as any)?.total || sum).toFixed(3),
+        amount: typeof amount === 'number' ? amount.toFixed(3) : '',
+        currency,
+      });
+    } catch {
+      // fallback below
+    }
+  }
+  const tpl = normalizeTicketTemplate((settings as any)?.clientTicketTemplate);
+  const separator = tpl === 'COMPACT' ? '------------------------' : '------------------------------';
+  const strongSeparator = tpl === 'MODERN' ? '==============================' : '==============================';
   const lines: string[] = [];
   lines.push(strongSeparator);
   lines.push((settings as any)?.restaurantName ? String((settings as any).restaurantName) : 'Ticket client');
@@ -426,18 +482,7 @@ const buildReceiptText = (
   lines.push(show('showPhone', true) && (settings as any)?.phone ? `Tel: ${String((settings as any).phone)}` : '');
   lines.push(show('showTaxId', true) && (settings as any)?.taxId ? `MF: ${String((settings as any).taxId)}` : '');
   lines.push(separator);
-  let sum = 0;
-  for (const it of items) {
-    const qty = Number((it as any).quantity || 0);
-    const price = Number((it as any).unitPrice || 0);
-    const total = qty * price;
-    sum += total;
-    if (show('showItemUnitPrice', true)) {
-      lines.push(`${(it as any).name} x${qty} @ ${price.toFixed(3)} = ${total.toFixed(3)}`);
-    } else {
-      lines.push(`${(it as any).name} x${qty} = ${total.toFixed(3)}`);
-    }
-  }
+  for (const row of itemRows) lines.push(row);
   lines.push(separator);
   lines.push(show('showPriceHt', true) ? `Sous-total: ${sum.toFixed(3)} ${currency}` : '');
   lines.push(show('showTicketDiscount', true) && Number((ticket as any)?.discount || 0) > 0
@@ -601,7 +646,21 @@ export async function printOrderItemsByPrinter(
 		const printerIds = Array.isArray(product?.printerIds)
 			? product?.printerIds
 			: [];
-		if (!printerIds.length) return;
+		if (!printerIds.length) {
+      const station = String((item as any)?.station || '').trim().toUpperCase();
+      const wantedProfile = station === 'BAR' ? 'bar' : station === 'KITCHEN' ? 'kitchen' : '';
+      if (!wantedProfile) return;
+      const fallbackPrinter = printers.find((p) => {
+        const pType = String((p as any).type || '').toUpperCase();
+        if (pType === 'RECEIPT') return false;
+        return resolvePrinterBonProfile(p) === wantedProfile;
+      });
+      if (!fallbackPrinter?.id) return;
+      const list = groups.get(fallbackPrinter.id) || [];
+      list.push(item);
+      groups.set(fallbackPrinter.id, list);
+      return;
+    }
 
 		printerIds.forEach((pid) => {
 			const list = groups.get(pid) || [];
@@ -745,15 +804,23 @@ export async function printPaymentReceipt(
     )} printer=${String(printTarget || 'N/A')}`,
   );
   for (let i = 0; i < copies; i += 1) {
-    try {
-      await printPdf(printTarget, pdfPath, {
-        terminalNodeId: (mapped as any)?.terminalNodeId || null,
-        terminalPrinterLocalId: (mapped as any)?.terminalPrinterLocalId || null,
-      });
-    } catch {
+    const isCloudRoute = Boolean((mapped as any)?.terminalNodeId);
+    if (isCloudRoute) {
       await printText(printTarget, text, {
         terminalNodeId: (mapped as any)?.terminalNodeId || null,
         terminalPrinterLocalId: (mapped as any)?.terminalPrinterLocalId || null,
+      });
+      continue;
+    }
+    try {
+      await printPdf(printTarget, pdfPath, {
+        terminalNodeId: null,
+        terminalPrinterLocalId: null,
+      });
+    } catch {
+      await printText(printTarget, text, {
+        terminalNodeId: null,
+        terminalPrinterLocalId: null,
       });
     }
   }

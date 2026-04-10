@@ -186,3 +186,45 @@ export async function getLatestMigrationReport(req: Request, res: Response) {
     res.status(500).json({ error: (err as any)?.message || 'Server error' });
   }
 }
+
+export async function downloadClientReceiptTemplateSample(_req: Request, res: Response) {
+  try {
+    const sample = [
+      '==============================',
+      '{{restaurantName}}',
+      '{{headerText}}',
+      'Ticket {{ticketCode}}',
+      'Commande {{orderNumber}}',
+      'Table: {{tableNumber}}',
+      'Serveur: {{serverName}}',
+      'Date: {{createdAt}}',
+      'Adresse: {{address}}',
+      'Tel: {{phone}}',
+      'MF: {{taxId}}',
+      '------------------------------',
+      '{{itemsLines}}',
+      '------------------------------',
+      'Sous-total: {{subtotal}} {{currency}}',
+      'Remise: {{discount}} {{currency}}',
+      'Timbre: {{timbre}} {{currency}}',
+      'Total TTC: {{total}} {{currency}}',
+      'Règlement: {{amount}} {{currency}}',
+      '{{footerText}}',
+      '==============================',
+      '',
+      '# Place ce fichier ici (Windows):',
+      '# C:\\ProgramData\\AxiaFlex\\templates\\client-receipt-template.txt',
+      '# Le moteur remplacera automatiquement les placeholders.',
+      '',
+    ].join('\n');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="client-receipt-template.sample.txt"',
+    );
+    res.send(sample);
+  } catch (err) {
+    console.error('downloadClientReceiptTemplateSample error:', err);
+    res.status(500).json({ error: (err as any)?.message || 'Server error' });
+  }
+}

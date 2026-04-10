@@ -160,6 +160,7 @@ router.get('/settings/pdf-archives', settingsController.listPdfArchives);
 router.get('/settings/pdf-archives/download', settingsController.downloadPdfArchiveFile);
 router.get('/settings/migration-reports', settingsController.listMigrationReports);
 router.get('/settings/migration-reports/latest', settingsController.getLatestMigrationReport);
+router.get('/settings/client-receipt-template/sample', settingsController.downloadClientReceiptTemplateSample);
 
 // Agent local (cloud printing bridge)
 router.post('/agent/register', agentController.registerAgent);

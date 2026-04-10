@@ -1501,6 +1501,33 @@ const SettingsManager: React.FC = () => {
     }
   };
 
+  const handleDownloadExternalTicketTemplateSample = async () => {
+    try {
+      const response = await fetch(
+        `${SETTINGS_LOG_API_BASE}/pos/settings/client-receipt-template/sample`,
+        {
+          method: "GET",
+          cache: "no-store",
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Téléchargement impossible (${response.status})`);
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") || "";
+      const match = disposition.match(/filename="([^"]+)"/i);
+      const fileName = match?.[1] || "client-receipt-template.sample.txt";
+      downloadBlob(blob, fileName);
+      notifySuccess(
+        "Modèle externe téléchargé. Déposez-le dans C:\\ProgramData\\AxiaFlex\\templates\\client-receipt-template.txt",
+      );
+    } catch (e: any) {
+      notifyError(
+        e?.message || "Téléchargement du modèle externe impossible.",
+      );
+    }
+  };
+
   const refreshReservations = () => {
     setReservationLoading(true);
     return getTableReservations()
@@ -2632,7 +2659,7 @@ const SettingsManager: React.FC = () => {
                       </label>
                     ))}
                   </div>
-                  <div className="grid grid-cols-2 gap-2 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
                     <button
                       type="button"
                       onClick={handleExportTicketTemplate}
@@ -2648,6 +2675,14 @@ const SettingsManager: React.FC = () => {
                     >
                       <Upload size={12} />
                       Importer modèle
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadExternalTicketTemplateSample}
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-sky-50 text-sky-700 border border-sky-100 text-[10px] font-black uppercase tracking-wider hover:bg-sky-100"
+                    >
+                      <Download size={12} />
+                      Modèle C:
                     </button>
                     <input
                       ref={ticketTemplateImportRef}
