@@ -1528,6 +1528,54 @@ const SettingsManager: React.FC = () => {
     }
   };
 
+  const handleDownloadExternalKitchenTemplateSample = () => {
+    try {
+      const sample = [
+        "{{title}}",
+        "Commande #{{orderRef}}",
+        "Type: {{orderType}}",
+        "Table: {{tableNumber}}",
+        "Serveur: {{serverName}}",
+        "Heure: {{createdAt}}",
+        "------------------------------",
+        "{{itemsLines}}",
+        "{{footerText}}",
+        "",
+      ].join("\n");
+      const blob = new Blob([sample], { type: "text/plain;charset=utf-8;" });
+      downloadBlob(blob, "kitchen-ticket-template.sample.txt");
+      notifySuccess(
+        "Modèle cuisine téléchargé. Déposez-le dans C:\\ProgramData\\AxiaFlex\\templates\\kitchen-ticket-template.txt",
+      );
+    } catch {
+      notifyError("Téléchargement du modèle cuisine impossible.");
+    }
+  };
+
+  const handleDownloadExternalBarTemplateSample = () => {
+    try {
+      const sample = [
+        "{{title}}",
+        "Commande #{{orderRef}}",
+        "Type: {{orderType}}",
+        "Table: {{tableNumber}}",
+        "Serveur: {{serverName}}",
+        "Heure: {{createdAt}}",
+        "------------------------------",
+        "{{itemsLines}}",
+        "{{footerText}}",
+        "",
+      ].join("\n");
+      const blob = new Blob([sample], { type: "text/plain;charset=utf-8;" });
+      downloadBlob(blob, "bar-ticket-template.sample.txt");
+      notifySuccess(
+        "Modèle bar téléchargé. Déposez-le dans C:\\ProgramData\\AxiaFlex\\templates\\bar-ticket-template.txt",
+      );
+    } catch {
+      notifyError("Téléchargement du modèle bar impossible.");
+    }
+  };
+
   const refreshReservations = () => {
     setReservationLoading(true);
     return getTableReservations()
@@ -2841,6 +2889,24 @@ const SettingsManager: React.FC = () => {
                   <p className="text-[10px] font-black text-slate-600 uppercase">
                     Modèle impression production (Cuisine / Bar)
                   </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={handleDownloadExternalKitchenTemplateSample}
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-sky-50 text-sky-700 border border-sky-100 text-[10px] font-black uppercase tracking-wider hover:bg-sky-100"
+                    >
+                      <Download size={12} />
+                      Modèle C: Cuisine
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadExternalBarTemplateSample}
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-cyan-50 text-cyan-700 border border-cyan-100 text-[10px] font-black uppercase tracking-wider hover:bg-cyan-100"
+                    >
+                      <Download size={12} />
+                      Modèle C: Bar
+                    </button>
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div className="rounded-xl border border-slate-200 p-3 space-y-2">
                       <p className="text-[10px] font-black text-slate-700 uppercase">
