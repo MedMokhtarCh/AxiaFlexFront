@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld("appWinApi", {
   stopAgent: () => ipcRenderer.invoke("agent:stop"),
   getAgentStatus: () => ipcRenderer.invoke("agent:status"),
   detectPrinters: () => ipcRenderer.invoke("agent:detect-printers"),
+  testConnection: () => ipcRenderer.invoke("agent:test-connection"),
+  syncPrintersNow: () => ipcRenderer.invoke("agent:sync-printers-now"),
   testPrint: (printerName, text) =>
     ipcRenderer.invoke("agent:test-print", printerName, text),
   installService: () => ipcRenderer.invoke("service:install"),

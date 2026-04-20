@@ -20,6 +20,8 @@ const els = {
   bridgeTaskName: byId("bridgeTaskName"),
   bridgeServerStatusText: byId("bridgeServerStatusText"),
   saveBtn: byId("saveBtn"),
+  testConnectionBtn: byId("testConnectionBtn"),
+  syncPrintersBtn: byId("syncPrintersBtn"),
   startBtn: byId("startBtn"),
   stopBtn: byId("stopBtn"),
   statusText: byId("statusText"),
@@ -204,6 +206,26 @@ async function init() {
 
 els.saveBtn.addEventListener("click", async () => {
   await saveConfig();
+});
+
+els.testConnectionBtn.addEventListener("click", async () => {
+  await saveConfig();
+  const res = await appWinApi.testConnection();
+  appendLog(
+    res?.ok
+      ? `Connexion cloud OK. Terminal: ${res?.alias || "?"} (${res?.terminalId || "id?"})`
+      : `Connexion cloud KO: ${res?.error || "inconnue"}`,
+  );
+});
+
+els.syncPrintersBtn.addEventListener("click", async () => {
+  await saveConfig();
+  const res = await appWinApi.syncPrintersNow();
+  appendLog(
+    res?.ok
+      ? `Sync imprimantes OK. Terminal: ${res?.terminalAlias || "?"}, imprimantes: ${Number(res?.count || 0)}`
+      : `Sync imprimantes KO: ${res?.error || "inconnue"}`,
+  );
 });
 
 els.startBtn.addEventListener("click", async () => {

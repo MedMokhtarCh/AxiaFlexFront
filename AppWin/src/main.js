@@ -16,6 +16,100 @@ const AGENT_TASK_NAME = "AxiaPrintersPrintAgent";
 const BRIDGE_TASK_NAME = "AxiaPrintersDesktopBridgeAutostart";
 const AGENT_HOME_DIR = "AppWinAgent";
 
+async function postJson(url, body, headers = {}) {
+  const res = await fetch(String(url || ""), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify(body || {}),
+  });
+  let json = {};
+  try {
+    json = await res.json();
+  } catch {}
+  if (!res.ok) {
+    throw new Error(String(json?.error || `HTTP ${res.status}`));
+  }
+  return json;
+}
+
+async function getFingerprintForAgent() {
+  const hash = require("node:crypto");
+  let bios = "";
+  let board = "";
+  try {
+    const out1 = await runPowershellCommand(
+      "(Get-CimInstance Win32_BIOS | Select-Object -ExpandProperty SerialNumber)",
+    );
+    bios = String(out1?.stdout || "").trim();
+  } catch {}
+  try {
+    const out2 = await runPowershellCommand(
+      "(Get-CimInstance Win32_BaseBoard | Select-Object -ExpandProperty SerialNumber)",
+    );
+    board = String(out2?.stdout || "").trim();
+  } catch {}
+  const raw = `${os.hostname()}|${os.platform()}|${os.release()}|${bios}|${board}`;
+  return hash.createHash("sha256").update(raw, "utf8").digest("hex");
+}
+
+async function registerTerminalOnce(config) {
+  const base = String(config?.cloudApiUrl || "").replace(/\/+$/, "");
+  const masterToken = String(config?.agentMasterToken || "").trim();
+  const alias = String(config?.terminalAlias || "TERMINAL-1").trim();
+  const siteName = String(config?.siteName || "").trim();
+  if (!base) throw new Error("CLOUD_API_URL manquant.");
+  if (!masterToken) throw new Error("AGENT_MASTER_TOKEN manquant.");
+  const fingerprintHash = await getFingerprintForAgent();
+  const reg = await postJson(
+    `${base}/pos/agent/register`,
+    {
+      alias,
+      fingerprintHash,
+      siteName: siteName || null,
+      osInfo: `${os.platform()} ${os.release()}`,
+      agentVersion: "0.2.0",
+      capabilities: { rawTextPrint: true, htmlPrint: true, windows: true, source: "axiaprinters" },
+    },
+    { "x-agent-master-token": masterToken },
+  );
+  return {
+    terminalId: String(reg?.terminalId || "").trim(),
+    apiToken: String(reg?.apiToken || "").trim(),
+    alias: String(reg?.alias || alias),
+    base,
+  };
+}
+
+async function syncPrintersOnce(config) {
+  const reg = await registerTerminalOnce(config);
+  if (!reg.apiToken) throw new Error("apiToken terminal vide.");
+  const detectScript =
+    "$items=@(); " +
+    "try { $items += Get-Printer | Select-Object Name,DriverName,PortName } catch {}; " +
+    "try { $items += Get-CimInstance Win32_Printer | Select-Object @{n='Name';e={$_.Name}},@{n='DriverName';e={$_.DriverName}},@{n='PortName';e={$_.PortName}} } catch {}; " +
+    "$dedup = $items | Where-Object { $_.Name } | Group-Object Name | ForEach-Object { $_.Group | Select-Object -First 1 }; " +
+    "$dedup | ConvertTo-Json -Compress";
+  const out = await runPowershellCommand(detectScript);
+  if (!out.ok) throw new Error(out.stderr || out.stdout || "Détection imprimantes impossible");
+  let printers = [];
+  try {
+    const parsed = JSON.parse(out.stdout || "[]");
+    const arr = Array.isArray(parsed) ? parsed : [parsed];
+    printers = arr.map((p) => ({
+      ...p,
+      printerLocalId: String(p?.PortName || p?.Name || "").trim(),
+    }));
+  } catch {
+    printers = [];
+  }
+  await postJson(
+    `${reg.base}/pos/agent/printers`,
+    { printers },
+    { Authorization: `Bearer ${reg.apiToken}` },
+  );
+  return { ok: true, count: printers.length, terminalAlias: reg.alias };
+}
+
 function getConfigPath() {
   return path.join(app.getPath("userData"), "agent-config.json");
 }
@@ -747,6 +841,24 @@ app.whenReady().then(() => {
       return { ok: true, printers: Array.isArray(data) ? data : [data] };
     } catch {
       return { ok: true, printers: [] };
+    }
+  });
+  ipcMain.handle("agent:test-connection", async () => {
+    try {
+      const cfg = currentConfig || loadConfig();
+      const reg = await registerTerminalOnce(cfg);
+      if (!reg.apiToken) return { ok: false, error: "apiToken manquant après inscription terminal." };
+      return { ok: true, terminalId: reg.terminalId, alias: reg.alias };
+    } catch (e) {
+      return { ok: false, error: String(e?.message || e) };
+    }
+  });
+  ipcMain.handle("agent:sync-printers-now", async () => {
+    try {
+      const cfg = currentConfig || loadConfig();
+      return await syncPrintersOnce(cfg);
+    } catch (e) {
+      return { ok: false, error: String(e?.message || e) };
     }
   });
   ipcMain.handle("agent:test-print", async (_event, printerName, text) => {
