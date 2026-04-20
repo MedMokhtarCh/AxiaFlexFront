@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { AppDataSource } from '../data-source.js';
 import { TerminalNode } from '../entity/TerminalNode.js';
 import { TerminalPrinter } from '../entity/TerminalPrinter.js';
+import { Printer } from '../entity/Printer.js';
 import * as saas from './saasLicenseService.js';
 
 const AGENT_MASTER_TOKEN = String((process.env as any).AGENT_MASTER_TOKEN || '').trim();
@@ -164,4 +165,40 @@ export async function listTerminalsWithPrinters() {
     byTerminal.set(String(p.terminalNodeId), list);
   }
   return terminals.map((t: any) => ({ ...t, printers: byTerminal.get(String(t.id)) || [] }));
+}
+
+export async function deleteTerminalAndCleanup(terminalNodeId: string) {
+  const terminalId = String(terminalNodeId || '').trim();
+  if (!terminalId) throw new Error('terminalNodeId requis');
+  const tRepo = AppDataSource.getRepository(TerminalNode);
+  const tpRepo = AppDataSource.getRepository(TerminalPrinter);
+  const printerRepo = AppDataSource.getRepository(Printer);
+
+  const row = await tRepo.findOne({ where: { id: terminalId } as any });
+  if (!row) throw new Error('Terminal introuvable');
+
+  const unboundResult = await printerRepo
+    .createQueryBuilder()
+    .update()
+    .set({
+      terminalNodeId: null,
+      terminalPrinterLocalId: null,
+    } as any)
+    .where('terminalNodeId = :terminalId', { terminalId })
+    .execute();
+
+  await tpRepo
+    .createQueryBuilder()
+    .delete()
+    .from(TerminalPrinter)
+    .where('terminalNodeId = :terminalId', { terminalId })
+    .execute();
+
+  await tRepo.remove(row as any);
+
+  return {
+    ok: true,
+    terminalNodeId: terminalId,
+    unboundPrinters: Number(unboundResult?.affected || 0),
+  };
 }

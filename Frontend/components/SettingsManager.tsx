@@ -285,6 +285,7 @@ const SettingsManager: React.FC = () => {
     deletePrinter,
     getDetectedPrinters,
     getTerminalNodes,
+    deleteTerminalNode,
     bindPrinterTerminal,
     settings,
     updateSettings,
@@ -683,6 +684,7 @@ const SettingsManager: React.FC = () => {
   );
   const [selectedDetected, setSelectedDetected] = useState<string>("");
   const [terminalNodes, setTerminalNodes] = useState<TerminalNodeInfo[]>([]);
+  const [terminalCloudBusy, setTerminalCloudBusy] = useState(false);
   const [bindingDrafts, setBindingDrafts] = useState<
     Record<string, { terminalNodeId: string; terminalPrinterLocalId: string }>
   >({});
@@ -728,32 +730,57 @@ const SettingsManager: React.FC = () => {
     setSelectedDetected("");
   };
 
+  const refreshCloudTerminalsAndPrinters = async (
+    notifyDone = false,
+  ): Promise<void> => {
+    const uid = String(currentUser?.id || "").trim();
+    if (!uid) {
+      notifyError("Utilisateur requis pour charger les terminaux.");
+      return;
+    }
+    setTerminalCloudBusy(true);
+    try {
+      const res = await getTerminalNodes(uid);
+      const terminals = Array.isArray(res?.terminals) ? res.terminals : [];
+      setTerminalNodes(terminals);
+      const fromAgents: DetectedPrinter[] = terminals.flatMap((t) =>
+        (Array.isArray(t.printers) ? t.printers : []).map((lp) => ({
+          Name: String(lp.name || lp.printerLocalId || ""),
+          DriverName: String(lp.driverName || ""),
+          PortName: String(lp.printerLocalId || lp.portName || ""),
+        })),
+      );
+      setDetectedPrinters(fromAgents);
+      setBindingDrafts((prev) => {
+        const next = { ...prev };
+        for (const p of printers) {
+          if (!next[p.id]) {
+            next[p.id] = {
+              terminalNodeId: String((p as any).terminalNodeId || ""),
+              terminalPrinterLocalId: String(
+                (p as any).terminalPrinterLocalId || "",
+              ),
+            };
+          }
+        }
+        return next;
+      });
+      if (notifyDone) {
+        notifySuccess("Terminaux cloud rafraîchis.");
+      }
+    } catch (e: any) {
+      notifyError(e?.message || "Impossible de rafraîchir les terminaux.");
+      setTerminalNodes([]);
+    } finally {
+      setTerminalCloudBusy(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTab !== "hardware") return;
     if (printRoutingMode !== "CLOUD") return;
-    const uid = String(currentUser?.id || "").trim();
-    if (!uid) return;
-    void getTerminalNodes(uid)
-      .then((res) => {
-        const terminals = Array.isArray(res?.terminals) ? res.terminals : [];
-        setTerminalNodes(terminals);
-        setBindingDrafts((prev) => {
-          const next = { ...prev };
-          for (const p of printers) {
-            if (!next[p.id]) {
-              next[p.id] = {
-                terminalNodeId: String((p as any).terminalNodeId || ""),
-                terminalPrinterLocalId: String(
-                  (p as any).terminalPrinterLocalId || "",
-                ),
-              };
-            }
-          }
-          return next;
-        });
-      })
-      .catch(() => setTerminalNodes([]));
-  }, [activeTab, currentUser?.id, getTerminalNodes, printers, printRoutingMode]);
+    void refreshCloudTerminalsAndPrinters(false);
+  }, [activeTab, currentUser?.id, printers, printRoutingMode]);
 
   // Zones & Tables States
   const [newZoneName, setNewZoneName] = useState("");
@@ -7102,10 +7129,22 @@ const SettingsManager: React.FC = () => {
                 <h3 className="text-lg font-black text-slate-800">
                   Terminaux connectés
                 </h3>
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                  {terminalNodes.length} terminal
-                  {terminalNodes.length > 1 ? "s" : ""}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                    {terminalNodes.length} terminal
+                    {terminalNodes.length > 1 ? "s" : ""}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void refreshCloudTerminalsAndPrinters(true);
+                    }}
+                    disabled={terminalCloudBusy}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-60"
+                  >
+                    {terminalCloudBusy ? "..." : "Rafraîchir"}
+                  </button>
+                </div>
               </div>
               {terminalNodes.length === 0 ? (
                 <p className="text-sm font-bold text-slate-500">
@@ -7149,6 +7188,58 @@ const SettingsManager: React.FC = () => {
                         Imprimantes détectées:{" "}
                         {Array.isArray(t.printers) ? t.printers.length : 0}
                       </p>
+                      {Array.isArray(t.printers) && t.printers.length > 0 ? (
+                        <div className="space-y-1">
+                          {t.printers.slice(0, 4).map((lp) => (
+                            <p
+                              key={lp.id}
+                              className="text-[10px] text-slate-500 font-bold truncate"
+                            >
+                              • {lp.name} ({lp.transport})
+                            </p>
+                          ))}
+                          {t.printers.length > 4 ? (
+                            <p className="text-[10px] text-slate-400 font-bold">
+                              +{t.printers.length - 4} autre(s)...
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const uid = String(currentUser?.id || "").trim();
+                            if (!uid) {
+                              notifyError("Utilisateur requis pour supprimer un terminal.");
+                              return;
+                            }
+                            const ok = window.confirm(
+                              `Supprimer le terminal "${t.alias}" ?`,
+                            );
+                            if (!ok) return;
+                            try {
+                              const out = await deleteTerminalNode({
+                                userId: uid,
+                                terminalNodeId: t.id,
+                              });
+                              notifySuccess(
+                                `Terminal supprimé. ${Number(
+                                  out?.unboundPrinters || 0,
+                                )} imprimante(s) locale(s) déliée(s).`,
+                              );
+                              await refreshCloudTerminalsAndPrinters(false);
+                            } catch (e: any) {
+                              notifyError(
+                                e?.message || "Suppression terminal impossible.",
+                              );
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 text-[10px] font-black uppercase tracking-widest"
+                        >
+                          Supprimer
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -7164,24 +7255,7 @@ const SettingsManager: React.FC = () => {
                   <button
                     onClick={async () => {
                       if (printRoutingMode === "CLOUD") {
-                        const uid = String(currentUser?.id || "").trim();
-                        if (!uid) {
-                          notifyError("Utilisateur requis pour charger les terminaux.");
-                          return;
-                        }
-                        const res = await getTerminalNodes(uid);
-                        const terminals = Array.isArray(res?.terminals)
-                          ? res.terminals
-                          : [];
-                        setTerminalNodes(terminals);
-                        const fromAgents: DetectedPrinter[] = terminals.flatMap((t) =>
-                          (Array.isArray(t.printers) ? t.printers : []).map((lp) => ({
-                            Name: String(lp.name || lp.printerLocalId || ""),
-                            DriverName: String(lp.driverName || ""),
-                            PortName: String(lp.printerLocalId || lp.portName || ""),
-                          })),
-                        );
-                        setDetectedPrinters(fromAgents);
+                        await refreshCloudTerminalsAndPrinters(true);
                       } else {
                         const list = await getDetectedPrinters();
                         setDetectedPrinters(Array.isArray(list) ? list : []);

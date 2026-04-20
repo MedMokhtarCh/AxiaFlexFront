@@ -206,6 +206,7 @@ router.post('/agent/printers', agentController.updateAgentPrinters);
 router.get('/agent/jobs/pull', agentController.pullAgentJobs);
 router.post('/agent/jobs/:id/ack', agentController.ackAgentJob);
 router.get('/terminals', agentController.listTerminals);
+router.delete('/terminals/:id', agentController.deleteTerminal);
 router.patch('/printers/:id/bind-terminal', agentController.bindPrinterToTerminal);
 
 router.get('/stock/movements', stockController.listMovements);

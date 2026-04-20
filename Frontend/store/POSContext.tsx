@@ -2177,6 +2177,10 @@ interface POSContextType {
     terminals: TerminalNodeInfo[];
     bindings: Printer[];
   }>;
+  deleteTerminalNode: (params: {
+    userId: string;
+    terminalNodeId: string;
+  }) => Promise<{ ok: boolean; terminalNodeId: string; unboundPrinters: number }>;
   bindPrinterTerminal: (params: {
     userId: string;
     printerId: string;
@@ -4281,6 +4285,21 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
       bindings: Printer[];
     };
   };
+  const deleteTerminalNode = async (params: {
+    userId: string;
+    terminalNodeId: string;
+  }) => {
+    const uid = String(params.userId || "").trim();
+    const terminalNodeId = String(params.terminalNodeId || "").trim();
+    if (!uid) throw new Error("userId requis");
+    if (!terminalNodeId) throw new Error("terminalNodeId requis");
+    return (await apiFetch(
+      `/pos/terminals/${encodeURIComponent(terminalNodeId)}?userId=${encodeURIComponent(uid)}`,
+      {
+        method: "DELETE",
+      },
+    )) as { ok: boolean; terminalNodeId: string; unboundPrinters: number };
+  };
   const bindPrinterTerminal = async (params: {
     userId: string;
     printerId: string;
@@ -5300,6 +5319,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
         deletePrinter,
         getDetectedPrinters,
         getTerminalNodes,
+        deleteTerminalNode,
         bindPrinterTerminal,
         printProductionTest,
         printReceiptTest,
