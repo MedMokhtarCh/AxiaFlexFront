@@ -1074,16 +1074,27 @@ const openUrlInBrowser = async (url: string): Promise<void> => {
 /**
  * PRIMARY print function for LOCAL mode.
  * Registers HTML in the in-memory store, opens http://localhost:PORT/print/preview/<token>.
- * For CLOUD mode, strips HTML tags and enqueues as plain text.
+ * For CLOUD mode, enqueue the same HTML so layout stays identical across modes.
  */
 const printViaLocalBrowser = async (
   printerName: string,
   htmlContent: string,
-  _tag = 'print',
+  tag = 'print',
   printerMeta?: { terminalNodeId?: string | null; terminalPrinterLocalId?: string | null },
 ): Promise<void> => {
   if (await shouldEnqueueTerminalJob(printerMeta)) {
-    await printText(printerName, htmlToPlainText(htmlContent), printerMeta);
+    await enqueuePrintJob({
+      terminalNodeId: String(printerMeta!.terminalNodeId),
+      printerLocalId: printerMeta!.terminalPrinterLocalId || null,
+      printerName: printerName || null,
+      payload: {
+        type: 'HTML_PRINT',
+        printerName,
+        fileName: `${sanitizeFileName(String(tag || 'print'), 'print')}.html`,
+        htmlBase64: Buffer.from(String(htmlContent || ''), 'utf8').toString('base64'),
+      },
+      maxRetries: 3,
+    });
     return;
   }
   const token = registerPrintPage(htmlContent);
