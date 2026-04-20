@@ -1,0 +1,1 @@
+{"at":"2026-04-07T15:44:13.563Z","action":"license_patch","patchKeys":["maxUsers","maxProducts","maxOrders","enabledModules","companyTypeManagedBySaas","forcedCompanyType","licenseKey","licenseExpiresAt","externalLicenseApiEnabled","externalLicenseApiBaseUrl","externalLicenseVerifyPath","externalLicenseTenantId"],"hasNewSuperAdminCode":false}

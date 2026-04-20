@@ -96,7 +96,9 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
     allUsers,
     createTicket,
     printTicket,
+    printOrderClientReceiptProvisional,
     downloadTicketPdf,
+    getAvailableStockLots,
   } = usePOS();
   const [activeCategoryId, setActiveCategoryId] = useState<string>("favorites");
   const [cart, setCart] = useState<OrderItem[]>([]);
@@ -113,6 +115,12 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [completedOrder, setCompletedOrder] = useState<any>(null);
   const [completedTicketId, setCompletedTicketId] = useState<string | null>(null);
+  const [completedFiscalInfo, setCompletedFiscalInfo] = useState<{
+    status: "SIGNED" | "REJECTED";
+    mode?: "ONLINE" | "OFFLINE";
+    errorCode?: string;
+    imdf?: string;
+  } | null>(null);
   const [ticketPreviewMode, setTicketPreviewMode] = useState<"ORDER_ONLY" | "PAYMENT">("PAYMENT");
   const [ticketPreviewTab, setTicketPreviewTab] = useState<"KITCHEN" | "BAR" | "CLIENT">("CLIENT");
   const [mixedPayments, setMixedPayments] = useState<MixedPaymentLine[]>([]);
@@ -131,6 +139,8 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
   const scannerLastTsRef = useRef(0);
   const shouldAutoFocusPaymentRef = useRef(false);
   const initialPaymentIntentConsumedRef = useRef(false);
+  const autoPrintedTicketRef = useRef<string | null>(null);
+  const autoPrintedProvisionalOrderRef = useRef<string | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelAdminPin, setCancelAdminPin] = useState("");
 
@@ -483,7 +493,7 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
     };
   }, [showPaymentModal]);
 
-  const addToCart = (product: Product, variant?: ProductVariant) => {
+  const addToCart = async (product: Product, variant?: ProductVariant) => {
     if (isProductOutOfStock(product) && !variant) {
       notifyInfo(`Article hors stock: ${product.name}`);
       return;
@@ -499,6 +509,50 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
       ? `${product.name} (${variant.name})`
       : product.name;
     const variantId = variant?.id;
+    const stockType = String((product as any)?.stockType || "SIMPLE").toUpperCase();
+    let stockBatchNo: string | undefined;
+    if (product.manageStock && (stockType === "LOT" || stockType === "SERIAL")) {
+      const lots = await getAvailableStockLots({
+        productId: product.id,
+        variantId: variantId || null,
+      });
+      const available = (lots || []).filter(
+        (l: any) => Number((l as any)?.remainingQuantity || 0) > 0,
+      );
+      if (!available.length) {
+        notifyError(`Aucun ${stockType === "SERIAL" ? "numéro de série" : "lot"} disponible pour ${product.name}`);
+        return;
+      }
+      const options = available
+        .map((l: any) => `${String((l as any)?.batchNo || "-")} (qte ${Number((l as any)?.remainingQuantity || 0)})`)
+        .join(", ");
+      const inputLabel =
+        stockType === "SERIAL"
+          ? `Choisir numéro de série pour ${itemName}\nDisponibles: ${options}`
+          : `Choisir numéro de lot pour ${itemName}\nDisponibles: ${options}`;
+      const picked = window.prompt(inputLabel, String((available[0] as any)?.batchNo || ""));
+      const pickedTrim = String(picked || "").trim();
+      if (!pickedTrim) return;
+      const found = available.find(
+        (l: any) => String((l as any)?.batchNo || "").trim() === pickedTrim,
+      );
+      if (!found) {
+        notifyError(`${stockType === "SERIAL" ? "Série" : "Lot"} introuvable`);
+        return;
+      }
+      if (
+        stockType === "SERIAL" &&
+        cart.some(
+          (it) =>
+            it.productId === product.id &&
+            String((it as any).stockBatchNo || "") === pickedTrim,
+        )
+      ) {
+        notifyError("Ce numéro de série est déjà ajouté au panier.");
+        return;
+      }
+      stockBatchNo = pickedTrim;
+    }
     const station = resolveItemStation(
       { productId: product.id, station: undefined },
       prepLookupMaps.productsById,
@@ -507,11 +561,18 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
 
     setCart((prev) => {
       const existing = prev.find(
-        (item) => item.productId === product.id && item.variantId === variantId,
+        (item) =>
+          item.productId === product.id &&
+          item.variantId === variantId &&
+          String((item as any).stockBatchNo || "") === String(stockBatchNo || ""),
       );
+      const serialMode = stockType === "SERIAL";
       if (existing) {
+        if (serialMode) return prev;
         return prev.map((item) =>
-          item.productId === product.id && item.variantId === variantId
+          item.productId === product.id &&
+          item.variantId === variantId &&
+          String((item as any).stockBatchNo || "") === String(stockBatchNo || "")
             ? { ...item, quantity: item.quantity + 1 }
             : item,
         );
@@ -525,9 +586,14 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
           name: itemName,
           price: priceToUse,
           quantity: 1,
+          paidQuantity: 0,
+          remainingQuantity: 1,
+          isLocked: false,
+          status: "UNPAID",
           notes: "",
           discount: 0,
           station,
+          stockBatchNo,
         },
       ];
     });
@@ -640,6 +706,30 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
     [printTicket, settings.clientTicketPrintCopies],
   );
 
+  const toFiscalInfo = useCallback((ticket: any) => {
+    const statusRaw = String(ticket?.fiscalStatus || "")
+      .trim()
+      .toUpperCase();
+    if (statusRaw !== "SIGNED" && statusRaw !== "REJECTED") return null;
+    const modeRaw = String(ticket?.fiscalMode || "")
+      .trim()
+      .toUpperCase();
+    return {
+      status: statusRaw as "SIGNED" | "REJECTED",
+      mode:
+        modeRaw === "ONLINE" || modeRaw === "OFFLINE"
+          ? (modeRaw as "ONLINE" | "OFFLINE")
+          : undefined,
+      errorCode: ticket?.fiscalErrorCode
+        ? String(ticket.fiscalErrorCode)
+        : undefined,
+      imdf: ticket?.fiscalImdf ? String(ticket.fiscalImdf) : undefined,
+      qrPayload: ticket?.fiscalQrPayload
+        ? String(ticket.fiscalQrPayload)
+        : undefined,
+    };
+  }, []);
+
   const handleCompletePayment = async (
     method: PaymentMethod,
     paymentBreakdown?: OrderPayment[],
@@ -689,7 +779,7 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
           status: "PENDING" as any,
           print: true,
           ...fastFoodClientExtras(),
-        });
+        } as any);
       }
 
       const lines: OrderPayment[] =
@@ -750,6 +840,10 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
       const ticketsFromPayment = Array.isArray((latestPaidOrder as any)?.tickets)
         ? (latestPaidOrder as any).tickets
         : [];
+      let latestTicketData: any =
+        ticketsFromPayment.length > 0
+          ? ticketsFromPayment[ticketsFromPayment.length - 1]
+          : null;
       let createdTicketId = String(
         ticketsFromPayment.length > 0
           ? ticketsFromPayment[ticketsFromPayment.length - 1]?.id || ""
@@ -763,13 +857,16 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
           timbre: timbreAmount,
         });
         createdTicketId = String(ticket?.id || "");
+        latestTicketData = ticket;
       }
+      const fiscalInfo = toFiscalInfo(latestTicketData);
       if (createdTicketId && settings.autoDownloadReceiptPdfOnClient) {
         void downloadTicketPdf(createdTicketId).catch(() => undefined);
       }
       const doneOrderData = { ...orderData, id: orderId };
       setCompletedOrder(doneOrderData);
       setCompletedTicketId(createdTicketId || null);
+      setCompletedFiscalInfo(fiscalInfo);
       setShowPaymentModal(false);
       setShowMixedPaymentModal(false);
       setCart([]);
@@ -777,6 +874,15 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
       setTicketDiscount({ type: null, value: 0 });
       if (isFastFood) setFastFoodClientName("");
       notifySuccess("Paiement effectué avec succès.");
+      if (fiscalInfo?.status === "SIGNED") {
+        notifyInfo(
+          `Fiscalisation NACEF: SIGNED${fiscalInfo.mode ? ` (${fiscalInfo.mode})` : ""}${fiscalInfo.imdf ? ` • ${fiscalInfo.imdf}` : ""}`,
+        );
+      } else if (fiscalInfo?.status === "REJECTED") {
+        notifyError(
+          `Fiscalisation NACEF rejetée${fiscalInfo.errorCode ? ` (${fiscalInfo.errorCode})` : ""}`,
+        );
+      }
 
       const shouldPrintPreview =
         settings.printPreviewOnValidate || requirePrintOnPayment;
@@ -818,6 +924,9 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
     [finalTotal, mixedPaidTotal],
   );
   const ticketPreviewShellClass = useMemo(() => {
+    if (Boolean((settings as any)?.nacefEnabled)) {
+      return "w-full max-w-[340px] bg-white p-8 rounded-3xl border-2 border-slate-900 shadow-2xl";
+    }
     switch (settings.clientTicketTemplate) {
       case "COMPACT":
         return "w-full max-w-[300px] bg-white p-6 rounded-2xl border shadow-2xl";
@@ -827,7 +936,7 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
       default:
         return "w-full max-w-[320px] bg-white p-8 rounded-3xl border shadow-2xl";
     }
-  }, [settings.clientTicketTemplate]);
+  }, [settings.clientTicketTemplate, (settings as any)?.nacefEnabled]);
   const enabledPaymentMethods = useMemo(() => {
     const raw = Array.isArray(settings.paymentEnabledMethods)
       ? settings.paymentEnabledMethods
@@ -949,6 +1058,55 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
     kitchenBarPreview.kitchenItems.length,
     kitchenBarPreview.barItems.length,
     showClientTicketPreview,
+  ]);
+
+  // Keep preview in the same window, but trigger printing automatically once.
+  useEffect(() => {
+    if (!showTicketModal) return;
+    if (!showClientTicketPreview) return;
+    if ((settings as any)?.printAutoOnPreview === false) return;
+    if (completedTicketId) {
+      if (autoPrintedTicketRef.current === completedTicketId) return;
+      autoPrintedTicketRef.current = completedTicketId;
+      void printTicketCopies(completedTicketId)
+        .then(() => {
+          notifySuccess("Impression automatique envoyee a l'imprimante configuree.");
+        })
+        .catch((e: any) => {
+          notifyError(
+            e?.message
+              ? `Impression auto: ${String(e.message)}`
+              : "Impossible de lancer l'impression automatique",
+          );
+        });
+      return;
+    }
+
+    if (ticketPreviewMode !== "ORDER_ONLY") return;
+    const provisionalOrderId = String(completedOrder?.id || "").trim();
+    if (!provisionalOrderId) return;
+    if (autoPrintedProvisionalOrderRef.current === provisionalOrderId) return;
+    autoPrintedProvisionalOrderRef.current = provisionalOrderId;
+    void printOrderClientReceiptProvisional(provisionalOrderId)
+      .then(() => {
+        notifySuccess("Impression automatique du ticket provisoire envoyee.");
+      })
+      .catch((e: any) => {
+        notifyError(
+          e?.message
+            ? `Impression auto: ${String(e.message)}`
+            : "Impossible de lancer l'impression automatique",
+        );
+      });
+  }, [
+    showTicketModal,
+    showClientTicketPreview,
+    completedTicketId,
+    ticketPreviewMode,
+    completedOrder?.id,
+    printTicketCopies,
+    printOrderClientReceiptProvisional,
+    settings,
   ]);
 
   const updateMixedPayment = (
@@ -1422,7 +1580,7 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
       </div>
 
       {/* Cart Panel - Dense & Information rich */}
-      <div className="w-80 lg:w-96 bg-white rounded-[2rem] shadow-2xl border border-slate-200 flex flex-col overflow-hidden shrink-0 animate-in slide-in-from-right duration-300">
+      <div className="w-80 lg:w-96 h-full min-h-0 bg-white rounded-[2rem] shadow-2xl border border-slate-200 flex flex-col overflow-hidden shrink-0 animate-in slide-in-from-right duration-300">
         <div className="p-4 border-b bg-slate-50/50 flex justify-between items-center">
           <div>
             <h2 className="text-base font-black text-slate-800">
@@ -1467,11 +1625,12 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
         )}
 
         {/* Dense Cart List */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-hide">
+        <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1 scrollbar-hide">
           {cart.map((item) => {
             const hasMeta =
               (item.notes && item.notes.length > 0) ||
-              (item.discount && item.discount > 0);
+              (item.discount && item.discount > 0) ||
+              Boolean((item as any).stockBatchNo);
             return (
               <div
                 key={item.id}
@@ -1537,6 +1696,11 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
                     {item.discount > 0 && (
                       <span className="text-[8px] font-bold text-rose-600 bg-rose-100/50 px-1.5 py-0.5 rounded uppercase tracking-tighter">
                         Remise -{formatAmount(item.discount)}
+                      </span>
+                    )}
+                    {(item as any).stockBatchNo && (
+                      <span className="text-[8px] font-bold text-amber-700 bg-amber-100/60 px-1.5 py-0.5 rounded uppercase tracking-tighter">
+                        Lot/Série: {String((item as any).stockBatchNo)}
                       </span>
                     )}
                   </div>
@@ -2619,6 +2783,30 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
                   <p>Terminal: {settings.terminalId || "-"}</p>
                 ) : null}
               </div>
+              {completedFiscalInfo ? (
+                <div
+                  className={`mt-3 rounded-xl border px-3 py-2 text-left text-[10px] ${
+                    completedFiscalInfo.status === "SIGNED"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-rose-200 bg-rose-50 text-rose-700"
+                  }`}
+                >
+                  <p className="font-black uppercase tracking-widest">
+                    NACEF {completedFiscalInfo.status}
+                    {completedFiscalInfo.mode
+                      ? ` • ${completedFiscalInfo.mode}`
+                      : ""}
+                  </p>
+                  {completedFiscalInfo.imdf ? (
+                    <p className="font-bold">IMDF: {completedFiscalInfo.imdf}</p>
+                  ) : null}
+                  {completedFiscalInfo.errorCode ? (
+                    <p className="font-bold">
+                      Code erreur: {completedFiscalInfo.errorCode}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
             {(isRestaurantFlow || showClientTicketPreview) ? (
@@ -2799,13 +2987,24 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
                 />
               </div>
             ) : null}
-            {(showClientTicketPreview && ticketPreviewTab === "CLIENT") && ticketLayout.showFiscalQrCode ? (
+            {(showClientTicketPreview && ticketPreviewTab === "CLIENT") &&
+            (ticketLayout.showFiscalQrCode || Boolean((settings as any)?.nacefEnabled)) ? (
               <div className="mb-6 text-center">
                 <img
-                  src={`https://quickchart.io/qr?text=${encodeURIComponent(`MF:${settings.taxId || "N/A"}|TOTAL:${formatAmount(completedOrder.total)}`)}&size=100`}
+                  src={`https://quickchart.io/qr?text=${encodeURIComponent(
+                    String(
+                      (completedFiscalInfo as any)?.qrPayload ||
+                        `MF:${settings.taxId || "N/A"}|TOTAL:${formatAmount(completedOrder.total)}`,
+                    ),
+                  )}&size=100`}
                   alt="QR Fiscal"
                   className="w-[100px] h-[100px] mx-auto border border-slate-200 rounded"
                 />
+                {Boolean((settings as any)?.nacefEnabled) ? (
+                  <p className="text-[9px] text-slate-500 mt-1 font-black">
+                    QR fiscal NACEF
+                  </p>
+                ) : null}
               </div>
             ) : null}
             {ticketLayout.footerText ? (
@@ -2836,7 +3035,7 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
                 }}
                 className="w-full bg-slate-100 text-slate-900 font-black py-3.5 rounded-xl text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all mb-2"
               >
-                Imprimer Ticket ({Math.max(1, Number(settings.clientTicketPrintCopies || 1))}x)
+                Reimprimer Ticket ({Math.max(1, Number(settings.clientTicketPrintCopies || 1))}x)
               </button>
               ) : null}
               <button

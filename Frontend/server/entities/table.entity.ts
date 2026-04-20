@@ -7,13 +7,13 @@ export class TableConfig {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ type: 'varchar', length: 64 })
   number: string;
 
   @Column({ type: 'int' })
   capacity: number;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', length: 255, nullable: true })
   reservedBy?: string | null;
 
   @Column({ type: 'bigint', nullable: true })

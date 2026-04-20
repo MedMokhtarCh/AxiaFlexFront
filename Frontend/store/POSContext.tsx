@@ -36,6 +36,11 @@ import {
   ProductProfitabilityRow,
   ProductMovementRow,
   StockDocument,
+  RealtimeStockStateRow,
+  RealtimeStockDetails,
+  StockLot,
+  PreorderMenuItem,
+  PreorderRow,
   Supplier,
   Fund,
   FundSession,
@@ -226,7 +231,24 @@ interface AppSettings {
   applyTimbreToTicket: boolean;
   applyTimbreToInvoice: boolean;
   printPreviewOnValidate: boolean;
-  printRoutingMode?: "LOCAL" | "CLOUD";
+  printAutoOnPreview?: boolean;
+  printRoutingMode?: "LOCAL" | "CLOUD" | "DESKTOP_BRIDGE";
+  desktopPrintBridge?: {
+    enabled?: boolean;
+    url?: string;
+    token?: string;
+    timeoutMs?: number;
+  };
+  designerPrintTemplates?: {
+    clientHtml?: string;
+    kitchenHtml?: string;
+    barHtml?: string;
+  };
+  printTemplateSource?: {
+    client?: "BUILTIN" | "DESIGNER";
+    kitchen?: "BUILTIN" | "DESIGNER";
+    bar?: "BUILTIN" | "DESIGNER";
+  };
   touchUiMode?: boolean;
   clientKdsDisplayMode?: "STANDARD" | "WALLBOARD" | "AUTO";
   /** Largeur min (px) pour wallboard en mode AUTO (défaut 1920). */
@@ -371,7 +393,19 @@ const SimulatedBackend = {
       applyTimbreToTicket: true,
       applyTimbreToInvoice: true,
       printPreviewOnValidate: false,
+      printAutoOnPreview: true,
       printRoutingMode: "LOCAL",
+      desktopPrintBridge: {
+        enabled: false,
+        url: "http://127.0.0.1:17888",
+        token: "",
+        timeoutMs: 4000,
+      },
+      designerPrintTemplates: {
+        clientHtml: "",
+        kitchenHtml: "",
+        barHtml: "",
+      },
       touchUiMode: false,
       clientKdsDisplayMode: "STANDARD",
       clientKdsWallboardMinWidthPx: 1920,
@@ -2129,6 +2163,14 @@ interface POSContextType {
     type: string,
     bonProfile?: "kitchen" | "bar" | null,
   ) => Promise<void>;
+  updatePrinter: (
+    id: string,
+    updates: {
+      name: string;
+      type: string;
+      bonProfile?: "kitchen" | "bar" | null;
+    },
+  ) => Promise<void>;
   deletePrinter: (id: string) => Promise<void>;
   getDetectedPrinters: () => Promise<any[]>;
   getTerminalNodes: (userId: string) => Promise<{
@@ -2193,6 +2235,28 @@ interface POSContextType {
     documentId: string,
     lineId: string,
   ) => Promise<StockDocument | null>;
+  downloadStockDocumentPdf: (documentId: string) => Promise<void>;
+  getRealtimeStockState: () => Promise<RealtimeStockStateRow[]>;
+  getRealtimeStockDetails: (productId: string) => Promise<RealtimeStockDetails | null>;
+  getAvailableStockLots: (params: {
+    productId: string;
+    variantId?: string | null;
+  }) => Promise<StockLot[]>;
+  listPreorderMenu: () => Promise<PreorderMenuItem[]>;
+  listPreorders: (params?: { preorderUserId?: string }) => Promise<PreorderRow[]>;
+  updatePreorderStatus: (
+    preorderId: string,
+    status: "PENDING" | "CONFIRMED" | "READY" | "COMPLETED" | "CANCELLED",
+  ) => Promise<PreorderRow | null>;
+  createPreorder: (payload: {
+    preorderUserId?: string | null;
+    customerName: string;
+    customerPhone?: string | null;
+    mode: "DELIVERY" | "PICKUP" | "DINE_LATER";
+    scheduledAt?: number | null;
+    note?: string | null;
+    items: Array<{ productId: string; quantity: number; note?: string | null }>;
+  }) => Promise<PreorderRow | null>;
   getProductMovementReport: (params?: {
     productId?: string;
     from?: number;
@@ -2304,7 +2368,19 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
       applyTimbreToTicket: true,
       applyTimbreToInvoice: true,
       printPreviewOnValidate: false,
+      printAutoOnPreview: true,
       printRoutingMode: "LOCAL",
+      desktopPrintBridge: {
+        enabled: false,
+        url: "http://127.0.0.1:17888",
+        token: "",
+        timeoutMs: 4000,
+      },
+      designerPrintTemplates: {
+        clientHtml: "",
+        kitchenHtml: "",
+        barHtml: "",
+      },
       touchUiMode: false,
       clientKdsDisplayMode: "STANDARD",
       clientKdsWallboardMinWidthPx: 1920,
@@ -3819,6 +3895,31 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
     });
     setPrinters((prev) => [...prev, s]);
   };
+  const updatePrinter = async (
+    id: string,
+    updates: {
+      name: string;
+      type: string;
+      bonProfile?: "kitchen" | "bar" | null;
+    },
+  ) => {
+    await requireUserConfirmation("Modifier l'imprimante");
+    const s = await apiFetchTypedPath(
+      "/pos/printers/:id",
+      { id },
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: updates.name,
+          type: updates.type,
+          bonProfile:
+            updates.bonProfile === undefined ? undefined : updates.bonProfile,
+        }),
+      },
+    );
+    setPrinters((prev) => prev.map((p) => (p.id === id ? s : p)));
+  };
   const deletePrinter = async (id: string) => {
     await requireUserConfirmation("Supprimer l'imprimante");
     await apiFetchTypedPath("/pos/printers/:id", { id }, { method: "DELETE" });
@@ -4051,6 +4152,104 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
     await refreshStockMovements();
     const freshProducts = await apiFetchTyped("/pos/products");
     setProducts(((freshProducts || []) as any[]).map(normalizeProductAssets));
+    return saved || null;
+  };
+
+  const downloadStockDocumentPdf = async (documentId: string) => {
+    const path = buildPath("/pos/stock/documents/:id/pdf", { id: documentId });
+    if (useSimulatedBackend) return;
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error(`Téléchargement PDF impossible (${response.status})`);
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get("content-disposition") || "";
+    const match = disposition.match(/filename="([^"]+)"/i);
+    const fileName = match?.[1] || `stock-document-${documentId}.pdf`;
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const getRealtimeStockState = async () => {
+    const rows = (await apiFetch("/pos/stock/realtime-state")) as RealtimeStockStateRow[];
+    return rows || [];
+  };
+
+  const getRealtimeStockDetails = async (productId: string) => {
+    const pid = String(productId || "").trim();
+    if (!pid) return null;
+    const rows = (await apiFetch(
+      `/pos/stock/realtime-state/details?productId=${encodeURIComponent(pid)}`,
+    )) as RealtimeStockDetails;
+    return rows || null;
+  };
+
+  const getAvailableStockLots = async (params: {
+    productId: string;
+    variantId?: string | null;
+  }) => {
+    const productId = String(params.productId || "").trim();
+    const variantId = String(params.variantId || "").trim();
+    if (!productId) return [] as StockLot[];
+    const query = new URLSearchParams();
+    query.set("productId", productId);
+    if (variantId) query.set("variantId", variantId);
+    const rows = (await apiFetch(
+      `/pos/stock/lots/available?${query.toString()}`,
+    )) as StockLot[];
+    return rows || [];
+  };
+
+  const listPreorderMenu = async () => {
+    const rows = (await apiFetch("/pos/preorders/menu")) as PreorderMenuItem[];
+    return rows || [];
+  };
+
+  const listPreorders = async (params?: { preorderUserId?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.preorderUserId) query.set("preorderUserId", params.preorderUserId);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    const rows = (await apiFetch(`/pos/preorders${suffix}`)) as PreorderRow[];
+    return rows || [];
+  };
+
+  const updatePreorderStatus = async (
+    preorderId: string,
+    status: "PENDING" | "CONFIRMED" | "READY" | "COMPLETED" | "CANCELLED",
+  ) => {
+    const id = String(preorderId || "").trim();
+    if (!id) return null;
+    const saved = (await apiFetch(`/pos/preorders/${encodeURIComponent(id)}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    })) as PreorderRow;
+    return saved || null;
+  };
+
+  const createPreorder = async (payload: {
+    preorderUserId?: string | null;
+    customerName: string;
+    customerPhone?: string | null;
+    mode: "DELIVERY" | "PICKUP" | "DINE_LATER";
+    scheduledAt?: number | null;
+    note?: string | null;
+    items: Array<{ productId: string; quantity: number; note?: string | null }>;
+  }) => {
+    const saved = (await apiFetch("/pos/preorders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })) as PreorderRow;
     return saved || null;
   };
 
@@ -5097,6 +5296,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
         addFundMovement,
         getFundMovements,
         addPrinter,
+        updatePrinter,
         deletePrinter,
         getDetectedPrinters,
         getTerminalNodes,
@@ -5110,6 +5310,14 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({
         listStockDocuments,
         updateStockDocument,
         deleteStockDocumentLine,
+        downloadStockDocumentPdf,
+        getRealtimeStockState,
+        getRealtimeStockDetails,
+        getAvailableStockLots,
+        listPreorderMenu,
+        listPreorders,
+        updatePreorderStatus,
+        createPreorder,
         getProductMovementReport,
         updateSettings,
         uploadLogo,

@@ -15,7 +15,7 @@ param(
   [int]$PollMs = 3000,
 
   [Parameter(Mandatory = $false)]
-  [string]$ServiceName = "AxiaFlexPrintAgent"
+  [string]$ServiceName = "AxiaPrintersPrintAgent"
 )
 
 $ErrorActionPreference = "Stop"
@@ -64,20 +64,20 @@ function Escape-BatchEnv([string]$s) {
 }
 
 $elevated = (Test-IsElevated) -or (Test-NetSessionOk)
-Write-Host "[appwin-agent] Etape 1/5: verification droits administrateur..."
-Write-Host "[appwin-agent]   - SID S-1-5-32-544 (Administrateurs): $(Test-IsElevated)"
-Write-Host "[appwin-agent]   - net session: $(Test-NetSessionOk)"
+Write-Host "[axiaprinters-agent] Etape 1/5: verification droits administrateur..."
+Write-Host "[axiaprinters-agent]   - SID S-1-5-32-544 (Administrateurs): $(Test-IsElevated)"
+Write-Host "[axiaprinters-agent]   - net session: $(Test-NetSessionOk)"
 if (-not $elevated) {
-  Write-Host "[appwin-agent] ATTENTION: privileges administrateur recommandes pour la tache planifiee."
+  Write-Host "[axiaprinters-agent] ATTENTION: privileges administrateur recommandes pour la tache planifiee."
 }
 
 $agentDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-Write-Host "[appwin-agent] Etape 2/5: recherche de Node.js..."
+Write-Host "[axiaprinters-agent] Etape 2/5: recherche de Node.js..."
 $nodeCmd = Resolve-NodeCommand
 if (-not $nodeCmd) {
-  throw "Node.js introuvable. Relancez l'installateur AppWin (il installe Node automatiquement) ou installez Node LTS puis recommencez."
+  throw "Node.js introuvable. Relancez l'installateur AxiaPrinters (il installe Node automatiquement) ou installez Node LTS puis recommencez."
 }
-Write-Host "[appwin-agent]   Node: $nodeCmd"
+Write-Host "[axiaprinters-agent]   Node: $nodeCmd"
 $agentEntry = Join-Path $agentDir "agent-worker.js"
 
 if (-not (Test-Path $agentEntry)) {
@@ -85,7 +85,7 @@ if (-not (Test-Path $agentEntry)) {
 }
 
 $taskName = $ServiceName
-Write-Host "[appwin-agent] Etape 3/5: nettoyage ancien service Windows (erreur 1053 si Node en service)..."
+Write-Host "[axiaprinters-agent] Etape 3/5: nettoyage ancien service Windows (erreur 1053 si Node en service)..."
 $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($existingSvc) {
   if ($existingSvc.Status -eq "Running") {
@@ -95,7 +95,7 @@ if ($existingSvc) {
   Start-Sleep -Seconds 2
 }
 
-Write-Host "[appwin-agent] Etape 4/5: tache planifiee demarrage machine (remplace service Windows)..."
+Write-Host "[axiaprinters-agent] Etape 4/5: tache planifiee demarrage machine (remplace service Windows)..."
 try {
   $oldTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
   if ($oldTask) {
@@ -119,15 +119,15 @@ set "AGENT_MASTER_TOKEN=$t"
 set "TERMINAL_ALIAS=$a"
 set "SITE_NAME=$sn"
 set "AGENT_POLL_MS=$pm"
-set "AGENT_HOME=%LOCALAPPDATA%\AxiaFlex\AppWinAgent"
+set "AGENT_HOME=%LOCALAPPDATA%\AxiaPrinters\AppWinAgent"
 if not exist "%AGENT_HOME%" mkdir "%AGENT_HOME%"
 cd /d "%~dp0"
 "$nodeCmd" --trace-uncaught "%~dp0agent-worker.js" >> "%AGENT_HOME%\worker.log" 2>&1
 exit /b %ERRORLEVEL%
 "@
 [System.IO.File]::WriteAllText($launchCmd, $bat, [System.Text.Encoding]::ASCII)
-Write-Host "[appwin-agent]   Fichier lancement: $launchCmd"
-Write-Host "[appwin-agent]   Log worker: %LOCALAPPDATA%\AxiaFlex\AppWinAgent\worker.log"
+Write-Host "[axiaprinters-agent]   Fichier lancement: $launchCmd"
+Write-Host "[axiaprinters-agent]   Log worker: %LOCALAPPDATA%\AxiaPrinters\AppWinAgent\worker.log"
 
 $action = New-ScheduledTaskAction -Execute $launchCmd -WorkingDirectory $agentDir
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -140,18 +140,18 @@ $settings = New-ScheduledTaskSettingsSet `
 $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Highest
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
-Write-Host "[appwin-agent]   Tache enregistree: $taskName (utilisateur $currentUser, au logon)"
+Write-Host "[axiaprinters-agent]   Tache enregistree: $taskName (utilisateur $currentUser, au logon)"
 
-Write-Host "[appwin-agent] Etape 5/5: demarrage immediat de la tache (test)..."
+Write-Host "[axiaprinters-agent] Etape 5/5: demarrage immediat de la tache (test)..."
 try {
   Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
   Start-Sleep -Seconds 2
   $info = Get-ScheduledTask -TaskName $taskName | Get-ScheduledTaskInfo
-  Write-Host "[appwin-agent] Derniere execution: $($info.LastRunTime) Resultat: $($info.LastTaskResult)"
+  Write-Host "[axiaprinters-agent] Derniere execution: $($info.LastRunTime) Resultat: $($info.LastTaskResult)"
 } catch {
-  Write-Host "[appwin-agent] AVIS: impossible de lancer la tache maintenant: $($_.Exception.Message)"
-  Write-Host "[appwin-agent] Redemarrez le PC ou lancez l'agent depuis AppWin (Demarrer agent)."
+  Write-Host "[axiaprinters-agent] AVIS: impossible de lancer la tache maintenant: $($_.Exception.Message)"
+  Write-Host "[axiaprinters-agent] Redemarrez le PC ou lancez l'agent depuis AxiaPrinters (Demarrer agent)."
 }
 
-Write-Host "[appwin-agent] Termine (demarrage auto = tache planifiee, pas service Windows)."
+Write-Host "[axiaprinters-agent] Termine (demarrage auto = tache planifiee, pas service Windows)."
 Get-ScheduledTask -TaskName $taskName | Select-Object TaskName, State

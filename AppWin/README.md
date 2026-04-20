@@ -1,6 +1,6 @@
-# AppWin (Electron + Node)
+# AxiaPrinters (Electron + Node)
 
-Application Windows (Electron + Node) pour piloter l'agent d'impression local AxiaFlex via interface graphique.
+Application Windows (Electron + Node) pour piloter l'agent d'impression local AxiaPrinters via interface graphique.
 
 ## Prerequis
 

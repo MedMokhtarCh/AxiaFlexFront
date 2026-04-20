@@ -7,7 +7,7 @@ export class ProductVariant {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ type: 'varchar', length: 128 })
   name: string;
 
   @Column({ type: 'decimal', precision: 10, scale: 3 })

@@ -2,6 +2,7 @@ const os = require("node:os");
 const crypto = require("node:crypto");
 const path = require("node:path");
 const fs = require("node:fs/promises");
+const { pathToFileURL } = require("node:url");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 
@@ -11,7 +12,7 @@ const MASTER_TOKEN = String(process.env.AGENT_MASTER_TOKEN || "").trim();
 const TERMINAL_ALIAS = String(process.env.TERMINAL_ALIAS || os.hostname()).trim();
 const SITE_NAME = String(process.env.SITE_NAME || "").trim();
 const POLL_MS = Math.max(500, Number(process.env.AGENT_POLL_MS || 1000));
-const AGENT_HOME = path.join(process.env.LOCALAPPDATA || os.tmpdir(), "AxiaFlex", "AppWinAgent");
+const AGENT_HOME = path.join(process.env.LOCALAPPDATA || os.tmpdir(), "AxiaPrinters", "AppWinAgent");
 const STATE_FILE = path.join(AGENT_HOME, "state.json");
 
 async function ps(command) {
@@ -75,7 +76,7 @@ async function ensureRegistered() {
       siteName: SITE_NAME || null,
       osInfo: `${os.platform()} ${os.release()}`,
       agentVersion: "0.2.0",
-      capabilities: { rawTextPrint: true, windows: true, source: "appwin" },
+      capabilities: { rawTextPrint: true, htmlPrint: true, windows: true, source: "axiaprinters" },
     }),
   });
   const next = { terminalId: reg.terminalId, apiToken: reg.apiToken, alias: reg.alias };
@@ -102,7 +103,7 @@ async function detectPrinters() {
 }
 
 async function printRawText(printerName, text) {
-  const tmp = path.join(os.tmpdir(), `axiaflex-print-${Date.now()}.txt`);
+  const tmp = path.join(os.tmpdir(), `axiaprinters-print-${Date.now()}.txt`);
   await fs.writeFile(tmp, String(text || ""), "utf8");
   try {
     const escapedPath = String(tmp).replace(/'/g, "''");
@@ -120,21 +121,57 @@ async function printRawText(printerName, text) {
 }
 
 async function printPdfBase64(printerName, pdfBase64) {
-  const tmp = path.join(os.tmpdir(), `axiaflex-print-${Date.now()}.pdf`);
+  const tmp = path.join(os.tmpdir(), `axiaprinters-print-${Date.now()}.pdf`);
   const data = Buffer.from(String(pdfBase64 || ""), "base64");
   await fs.writeFile(tmp, data);
+  await printPdfFile(printerName, tmp);
+  await fs.unlink(tmp).catch(() => undefined);
+}
+
+async function printPdfFile(printerName, pdfPath) {
+  const escapedPath = String(pdfPath).replace(/'/g, "''");
+  const escapedPrinter = String(printerName || "").replace(/'/g, "''");
+  await execFileAsync("powershell", [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    `Start-Process -FilePath '${escapedPath}' -Verb PrintTo -ArgumentList '${escapedPrinter}' -WindowStyle Hidden`,
+  ]);
+}
+
+async function printHtmlBase64(printerName, htmlBase64) {
+  const tmpHtml = path.join(os.tmpdir(), `axiaprinters-print-${Date.now()}.html`);
+  const tmpPdf = path.join(os.tmpdir(), `axiaprinters-print-${Date.now()}.pdf`);
+  const data = Buffer.from(String(htmlBase64 || ""), "base64");
+  await fs.writeFile(tmpHtml, data);
   try {
-    const escapedPath = String(tmp).replace(/'/g, "''");
-    const escapedPrinter = String(printerName || "").replace(/'/g, "''");
-    await execFileAsync("powershell", [
-      "-NoProfile",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-Command",
-      `Start-Process -FilePath '${escapedPath}' -Verb PrintTo -ArgumentList '${escapedPrinter}' -WindowStyle Hidden`,
+    const candidates = [
+      "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+      "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    ];
+    let browserPath = "";
+    for (const p of candidates) {
+      try {
+        await fs.access(p);
+        browserPath = p;
+        break;
+      } catch {}
+    }
+    if (!browserPath) throw new Error("No Edge/Chrome found for HTML rendering");
+    const url = pathToFileURL(tmpHtml).toString();
+    await execFileAsync(browserPath, [
+      "--headless",
+      "--disable-gpu",
+      `--print-to-pdf=${tmpPdf}`,
+      url,
     ]);
+    await printPdfFile(printerName, tmpPdf);
   } finally {
-    await fs.unlink(tmp).catch(() => undefined);
+    await fs.unlink(tmpHtml).catch(() => undefined);
+    await fs.unlink(tmpPdf).catch(() => undefined);
   }
 }
 
@@ -176,6 +213,8 @@ async function processJobs(token) {
         await printRawText(printerName, String(payload.text || ""));
       } else if (type === "PDF_PRINT") {
         await printPdfBase64(printerName, String(payload.pdfBase64 || ""));
+      } else if (type === "HTML_PRINT") {
+        await printHtmlBase64(printerName, String(payload.htmlBase64 || ""));
       } else {
         throw new Error("Unsupported job payload type");
       }
@@ -213,7 +252,7 @@ async function loop() {
         token = String(reg.apiToken || "").trim();
         if (!token) throw new Error("apiToken agent manquant");
         terminalLabel = String(reg.alias || reg.terminalId || "?");
-        console.log(`[appwin-agent] terminal=${terminalLabel} id=${reg.terminalId}`);
+        console.log(`[axiaprinters-agent] terminal=${terminalLabel} id=${reg.terminalId}`);
       }
       await cloudFetch("/pos/agent/heartbeat", {
         method: "POST",
@@ -232,7 +271,7 @@ async function loop() {
       }
     } catch (e) {
       const msg = messageFromError(e);
-      console.error("[appwin-agent] cycle error:", msg);
+      console.error("[axiaprinters-agent] cycle error:", msg);
       if (
         msg.toLowerCase().includes("master token invalide") ||
         msg.includes("401") ||
@@ -249,5 +288,5 @@ async function loop() {
 }
 
 loop().catch((e) => {
-  console.error("[appwin-agent] fatal non bloquant:", messageFromError(e));
+  console.error("[axiaprinters-agent] fatal non bloquant:", messageFromError(e));
 });

@@ -25,6 +25,7 @@ import {
 import RestaurantFloorPlanEditor, {
   suggestTablePlanLayout,
 } from "./RestaurantFloorPlanEditor";
+import HtmlTemplateDesigner from "./HtmlTemplateDesigner";
 import {
   Printer as PrinterIcon,
   Trash2,
@@ -74,25 +75,71 @@ import {
   CreditCard,
   Ticket,
   ScanLine,
+  HelpCircle,
+  Lightbulb,
 } from "lucide-react";
 
 type ClientTicketTemplateUi = "CLASSIC" | "COMPACT" | "MODERN";
 type ClientKdsModeUi = "STANDARD" | "WALLBOARD" | "AUTO";
+type TvaCatalogEntry = { code: string; label: string; rate: number };
+type FiscalCategoryEntry = {
+  articleCategory: string;
+  familyCode: string;
+  label?: string;
+};
+
+const normalizeTvaCatalogFromSettings = (raw: any, fallbackRate = 0): TvaCatalogEntry[] => {
+  const list = Array.isArray(raw) ? raw : [];
+  const normalized = list
+    .map((row: any, index: number) => ({
+      code: String(row?.code || `TVA_${index + 1}`).trim().toUpperCase(),
+      label: String(row?.label || "").trim(),
+      rate: Number(row?.rate ?? 0),
+    }))
+    .filter((row: TvaCatalogEntry) => row.code.length > 0 && Number.isFinite(row.rate) && row.rate >= 0);
+  if (normalized.length > 0) return normalized;
+  return [{ code: "TVA_STD", label: "TVA standard", rate: Math.max(0, Number(fallbackRate || 0)) }];
+};
+
+const normalizeFiscalCategoryCatalogFromSettings = (raw: any): FiscalCategoryEntry[] => {
+  const list = Array.isArray(raw) ? raw : [];
+  return list
+    .map((row: any) => ({
+      articleCategory: String(
+        row?.articleCategory ?? row?.productCategory ?? row?.category ?? "",
+      ).trim(),
+      familyCode: String(row?.familyCode ?? row?.code ?? "")
+        .trim()
+        .toUpperCase(),
+      label: String(row?.label ?? "").trim(),
+    }))
+    .filter(
+      (row: FiscalCategoryEntry) =>
+        row.articleCategory.length > 0 && row.familyCode.length > 0,
+    );
+};
+
+const isValidFiscalFamilyCode = (value: string) =>
+  /^[A-Z0-9_]{2,32}$/.test(String(value || "").trim().toUpperCase());
 
 const GeneralSettingsSection: React.FC<{
   title: string;
   description?: string;
+  headerBadge?: React.ReactNode;
   onSave: () => void | Promise<void>;
   onReset: () => void;
   children: React.ReactNode;
-}> = ({ title, description, onSave, onReset, children }) => {
+}> = ({ title, description, headerBadge, onSave, onReset, children }) => {
   const [busy, setBusy] = useState(false);
   return (
     <div className="rounded-[1.5rem] border border-slate-200 bg-white shadow-sm p-6 sm:p-8 space-y-5">
       <div>
-        <h4 className="text-lg sm:text-xl font-black text-slate-800 tracking-tight">
-          {title}
-        </h4>
+        <div className="flex items-center gap-3 flex-wrap">
+          <h4 className="text-lg sm:text-xl font-black text-slate-800 tracking-tight">
+            {title}
+          </h4>
+          {headerBadge}
+        </div>
         {description ? (
           <p className="text-xs text-slate-500 mt-1 font-medium leading-relaxed">
             {description}
@@ -137,6 +184,7 @@ type SettingsTab =
   | "users"
   | "warehouses"
   | "permissions"
+  | "nacef"
   | "hardware"
   | "zones"
   | "notes"
@@ -177,6 +225,11 @@ const SETTINGS_TAB_ITEMS: {
     id: "permissions",
     label: "Caisses",
     description: "Fonds de caisse enregistrés (multi-poste / multi-devise).",
+  },
+  {
+    id: "nacef",
+    label: "NACEF",
+    description: "Etat S-MDF, certificat, synchronisation et test signature.",
   },
   {
     id: "hardware",
@@ -228,12 +281,14 @@ const SettingsManager: React.FC = () => {
     currentUser,
     printers,
     addPrinter,
+    updatePrinter,
     deletePrinter,
     getDetectedPrinters,
     getTerminalNodes,
     bindPrinterTerminal,
     settings,
     updateSettings,
+    categories,
     zones,
     addZone,
     deleteZone,
@@ -274,7 +329,314 @@ const SettingsManager: React.FC = () => {
     downloadPdfArchiveFile,
   } = usePOS();
 
+  const articleCategoryOptions = useMemo(() => {
+    const names = (Array.isArray(categories) ? categories : [])
+      .map((c: any) => String(c?.name || "").trim())
+      .filter((name: string) => name.length > 0);
+    return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b, "fr"));
+  }, [categories]);
+
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  const [nacefImdf, setNacefImdf] = useState<string>(
+    String((settings as any)?.nacefImdf || ""),
+  );
+  const [nacefManifest, setNacefManifest] = useState<any>(null);
+  const [nacefBusy, setNacefBusy] = useState(false);
+  const [nacefMode, setNacefMode] = useState<"ONLINE" | "OFFLINE">("ONLINE");
+  const [showNacefGuide, setShowNacefGuide] = useState(true);
+  const [nacefGuideStep, setNacefGuideStep] = useState(0);
+  const [nacefGuideSignDone, setNacefGuideSignDone] = useState(false);
+  const [nacefRuntimeMode, setNacefRuntimeMode] = useState<"SIMULATED" | "REMOTE">(
+    String((settings as any)?.nacefMode || "SIMULATED").toUpperCase() === "REMOTE"
+      ? "REMOTE"
+      : "SIMULATED",
+  );
+  const [nacefRuntimeBaseUrl, setNacefRuntimeBaseUrl] = useState<string>(
+    String((settings as any)?.nacefBaseUrl || "http://127.0.0.1:10006"),
+  );
+  const [showFormHelp, setShowFormHelp] = useState(false);
+  const [tourStep, setTourStep] = useState(0);
+  const tourGlowClass = (stepIndex: number) =>
+    showFormHelp && tourStep === stepIndex
+      ? "rounded-2xl border border-amber-300 bg-amber-50/60 shadow-[0_0_0_4px_rgba(251,191,36,0.22)]"
+      : "";
+  const goToTourStep = (nextStep: number) => {
+    const next = Math.max(0, Math.min(2, nextStep));
+    setTourStep(next);
+    if (next === 0) setActiveTab("general");
+    if (next === 1) setActiveTab("hardware");
+    if (next === 2) setActiveTab("general");
+  };
+
+  const nacefBaseUrl = SETTINGS_LOG_API_BASE || "";
+
+  const callNacef = async (path: string, init?: RequestInit) => {
+    const response = await fetch(`${nacefBaseUrl}${path}`, {
+      headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+      ...init,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(
+        String(data?.message || data?.error || data?.errorCode || "Erreur NACEF"),
+      );
+    }
+    return data;
+  };
+
+  const refreshNacefManifest = async () => {
+    const imdf = String(nacefImdf || "").trim().toUpperCase();
+    if (!imdf) throw new Error("IMDF requis");
+    const data = await callNacef(`/pos/nacef/manifest/${encodeURIComponent(imdf)}`, {
+      method: "GET",
+    });
+    setNacefManifest(data);
+    return data;
+  };
+
+  const runNacefAction = async (fn: () => Promise<any>, okMessage: string) => {
+    try {
+      setNacefBusy(true);
+      await fn();
+      notifySuccess(okMessage);
+    } catch (e: any) {
+      notifyError(e?.message || "Action NACEF impossible.");
+    } finally {
+      setNacefBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    setNacefImdf(String((settings as any)?.nacefImdf || ""));
+  }, [(settings as any)?.nacefImdf]);
+
+  useEffect(() => {
+    setNacefRuntimeMode(
+      String((settings as any)?.nacefMode || "SIMULATED").toUpperCase() === "REMOTE"
+        ? "REMOTE"
+        : "SIMULATED",
+    );
+    setNacefRuntimeBaseUrl(
+      String((settings as any)?.nacefBaseUrl || "http://127.0.0.1:10006"),
+    );
+  }, [(settings as any)?.nacefMode, (settings as any)?.nacefBaseUrl]);
+
+  useEffect(() => {
+    setNacefGuideSignDone(false);
+  }, [nacefImdf]);
+
+  useEffect(() => {
+    if (activeTab !== "nacef") return;
+    const imdf = String(nacefImdf || "").trim();
+    if (!imdf) return;
+    void runNacefAction(() => refreshNacefManifest(), "Etat NACEF chargé.");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  const nacefCanSign = Boolean((nacefManifest as any)?.canSign);
+  const nacefManifestLoaded = Boolean(nacefManifest);
+  const nacefBlockingCode = String((nacefManifest as any)?.blockingErrorCode || "")
+    .trim()
+    .toUpperCase();
+  const nacefBlockingMessage = String((nacefManifest as any)?.blockingMessage || "").trim();
+  const nacefRecommendation = (() => {
+    if (!nacefBlockingCode) return "Aucun blocage. La signature des tickets est autorisée.";
+    if (nacefBlockingCode === "SMDF_CERTIFICATE_REQUEST_PENDING") {
+      return "Finaliser la génération du certificat puis lancer une synchronisation.";
+    }
+    if (nacefBlockingCode === "SMDF_CERTFICATE_NOT_GENERATED") {
+      return "Demander/générer le certificat avant toute tentative de signature.";
+    }
+    if (nacefBlockingCode === "SMDF_NOT_SYNCHRONIZED") {
+      return "Lancer la synchronisation S-MDF pour autoriser les transactions.";
+    }
+    if (nacefBlockingCode === "SMDF_OFFLINE_TICKET_QUOTA_EXHAUSTED") {
+      return "Quota offline épuisé: repasser online et synchroniser immédiatement.";
+    }
+    if (nacefBlockingCode === "SMDF_EXPIRED_CERTIFICATE") {
+      return "Certificat expiré: renouveler le certificat puis synchroniser.";
+    }
+    if (nacefBlockingCode === "SMDF_IMDF_CAN_NOT_BE_USED") {
+      return "S-MDF suspendu: lever la suspension côté administration fiscale.";
+    }
+    if (nacefBlockingCode === "SMDF_REVOKED_CERTIFICATE") {
+      return "Certificat révoqué: régénérer un certificat valide puis synchroniser.";
+    }
+    return "Consulter le code de blocage et appliquer la procédure NACEF appropriée.";
+  })();
+
+  const nacefQuickAction = (() => {
+    if (nacefCanSign || !nacefManifestLoaded) return null;
+    if (
+      nacefBlockingCode === "SMDF_NOT_SYNCHRONIZED" ||
+      nacefBlockingCode === "SMDF_OFFLINE_TICKET_QUOTA_EXHAUSTED"
+    ) {
+      return { id: "sync", label: "Synchroniser maintenant" };
+    }
+    if (
+      nacefBlockingCode === "SMDF_CERTIFICATE_REQUEST_PENDING" ||
+      nacefBlockingCode === "SMDF_CERTFICATE_NOT_GENERATED"
+    ) {
+      return { id: "request-cert", label: "Demander certificat" };
+    }
+    if (nacefBlockingCode === "SMDF_EXPIRED_CERTIFICATE") {
+      return { id: "renew-cert", label: "Renouveler certificat (simulation)" };
+    }
+    if (nacefBlockingCode === "SMDF_IMDF_CAN_NOT_BE_USED") {
+      return { id: "reactivate", label: "Lever suspension" };
+    }
+    if (nacefBlockingCode === "SMDF_REVOKED_CERTIFICATE") {
+      return { id: "request-cert", label: "Regénérer certificat" };
+    }
+    return { id: "refresh", label: "Rafraîchir état" };
+  })();
+
+  const runNacefQuickAction = async () => {
+    const imdf = String(nacefImdf || "").trim().toUpperCase();
+    if (!imdf) throw new Error("IMDF requis");
+    if (!nacefQuickAction) return;
+    if (nacefQuickAction.id === "sync") {
+      await callNacef(`/pos/nacef/sync`, {
+        method: "POST",
+        body: JSON.stringify({ imdf, mode: nacefMode }),
+      });
+      await refreshNacefManifest();
+      return;
+    }
+    if (nacefQuickAction.id === "request-cert") {
+      await callNacef(`/pos/nacef/certificate/request`, {
+        method: "POST",
+        body: JSON.stringify({ imdf }),
+      });
+      await refreshNacefManifest();
+      return;
+    }
+    if (nacefQuickAction.id === "renew-cert") {
+      await callNacef(`/pos/nacef/certificate/simulate-generated`, {
+        method: "POST",
+        body: JSON.stringify({ imdf, expiresInDays: 365 }),
+      });
+      await callNacef(`/pos/nacef/sync`, {
+        method: "POST",
+        body: JSON.stringify({ imdf, mode: nacefMode }),
+      });
+      await refreshNacefManifest();
+      return;
+    }
+    if (nacefQuickAction.id === "reactivate") {
+      await callNacef(`/pos/nacef/status`, {
+        method: "POST",
+        body: JSON.stringify({ imdf, status: "ACTIVE" }),
+      });
+      await refreshNacefManifest();
+      return;
+    }
+    await refreshNacefManifest();
+  };
+
+  const nacefGuideSteps = [
+    {
+      title: "1) Renseigner l'identité fiscale",
+      hint: "Saisir IMDF, choisir le mode backend et l'URL S-MDF si mode REMOTE.",
+      actionLabel: "Enregistrer la config",
+      successMessage: "Configuration NACEF enregistrée.",
+      run: async () => {
+        await updateSettings({
+          nacefImdf: String(nacefImdf || "").trim(),
+          nacefMode: nacefRuntimeMode,
+          nacefBaseUrl: String(nacefRuntimeBaseUrl || "").trim(),
+        } as any);
+        await refreshNacefManifest();
+      },
+    },
+    {
+      title: "2) Vérifier l'état du module",
+      hint: "Lire le manifest pour connaître le statut, certificat et blocages.",
+      actionLabel: "Rafraîchir l'état",
+      successMessage: "Etat NACEF chargé.",
+      run: async () => {
+        await refreshNacefManifest();
+      },
+    },
+    {
+      title: "3) Demander un certificat",
+      hint: "Nécessaire avant toute signature si aucun certificat valide n'existe.",
+      actionLabel: "Demander certificat",
+      successMessage: "Demande certificat envoyée.",
+      run: async () => {
+        const imdf = String(nacefImdf || "").trim().toUpperCase();
+        if (!imdf) throw new Error("IMDF requis");
+        await callNacef(`/pos/nacef/certificate/request`, {
+          method: "POST",
+          body: JSON.stringify({ imdf }),
+        });
+        await refreshNacefManifest();
+      },
+    },
+    {
+      title: "4) Synchroniser le S-MDF",
+      hint: "La synchronisation est obligatoire pour autoriser la signature.",
+      actionLabel: "Synchroniser",
+      successMessage: "Synchronisation NACEF réussie.",
+      run: async () => {
+        const imdf = String(nacefImdf || "").trim().toUpperCase();
+        if (!imdf) throw new Error("IMDF requis");
+        await callNacef(`/pos/nacef/sync`, {
+          method: "POST",
+          body: JSON.stringify({ imdf, mode: nacefMode }),
+        });
+        await refreshNacefManifest();
+      },
+    },
+    {
+      title: "5) Tester la signature",
+      hint: "Signer un ticket test pour valider le flux de bout en bout.",
+      actionLabel: "Signer ticket test",
+      successMessage: "Ticket test signé.",
+      run: async () => {
+        const imdf = String(nacefImdf || "").trim().toUpperCase();
+        if (!imdf) throw new Error("IMDF requis");
+        await callNacef(`/pos/nacef/sign`, {
+          method: "POST",
+          body: JSON.stringify({
+            imdf,
+            ticket: {
+              id: `GUIDE-${Date.now()}`,
+              operationType: "SALE",
+              transactionType: "NORMAL",
+              totalHt: "10.000",
+              taxTotal: "1.900",
+            },
+          }),
+        });
+        setNacefGuideSignDone(true);
+        await refreshNacefManifest();
+      },
+    },
+  ] as const;
+  const nacefCurrentGuide = nacefGuideSteps[Math.max(0, Math.min(nacefGuideSteps.length - 1, nacefGuideStep))];
+  const normalizedImdfDraft = String(nacefImdf || "").trim().toUpperCase();
+  const normalizedSavedImdf = String((settings as any)?.nacefImdf || "").trim().toUpperCase();
+  const normalizedBaseUrlDraft = String(nacefRuntimeBaseUrl || "").trim();
+  const normalizedSavedBaseUrl = String((settings as any)?.nacefBaseUrl || "").trim();
+  const normalizedSavedRuntimeMode =
+    String((settings as any)?.nacefMode || "SIMULATED").toUpperCase() === "REMOTE"
+      ? "REMOTE"
+      : "SIMULATED";
+  const nacefGuideStepCompleted = [
+    Boolean(normalizedImdfDraft) &&
+      (nacefRuntimeMode !== "REMOTE" || Boolean(normalizedBaseUrlDraft)) &&
+      normalizedImdfDraft === normalizedSavedImdf &&
+      nacefRuntimeMode === normalizedSavedRuntimeMode &&
+      normalizedBaseUrlDraft === normalizedSavedBaseUrl,
+    Boolean(nacefManifestLoaded),
+    ["PIN_VALIDATED", "CERTIFICATE_GENERATED"].includes(
+      String((nacefManifest as any)?.certificateInfo?.certRequestStatus || "").toUpperCase(),
+    ),
+    String((nacefManifest as any)?.status || "").toUpperCase() === "SYNCHRONIZED",
+    nacefGuideSignDone || nacefCanSign,
+  ] as const;
+  const nacefGuideCurrentStepDone = Boolean(nacefGuideStepCompleted[nacefGuideStep]);
 
   // Staff Management States
   const [showAddUserModal, setShowAddUserModal] = useState(false);
@@ -308,6 +670,7 @@ const SettingsManager: React.FC = () => {
 
   // Hardware States
   const [newPrinterName, setNewPrinterName] = useState("");
+  const [editingPrinterId, setEditingPrinterId] = useState<string | null>(null);
   /** false = bon de préparation (poste libre) ; true = ticket client caisse */
   const [newPrinterIsReceipt, setNewPrinterIsReceipt] = useState(false);
   const [newPrinterStationLabel, setNewPrinterStationLabel] = useState("");
@@ -323,11 +686,16 @@ const SettingsManager: React.FC = () => {
   const [bindingDrafts, setBindingDrafts] = useState<
     Record<string, { terminalNodeId: string; terminalPrinterLocalId: string }>
   >({});
+  const routingRaw = String((settings as any)?.printRoutingMode || "LOCAL")
+    .toUpperCase()
+    .trim();
   const printRoutingMode =
-    String((settings as any)?.printRoutingMode || "LOCAL").toUpperCase() ===
-    "CLOUD"
+    routingRaw === "CLOUD"
       ? "CLOUD"
-      : "LOCAL";
+      : routingRaw === "DESKTOP_BRIDGE"
+        ? "DESKTOP_BRIDGE"
+        : "LOCAL";
+  const desktopBridgeCfg = ((settings as any)?.desktopPrintBridge || {}) as any;
 
   const guessBonProfileFromName = (name: string): "kitchen" | "bar" => {
     const n = name.toLowerCase();
@@ -339,6 +707,25 @@ const SettingsManager: React.FC = () => {
     )
       return "bar";
     return "kitchen";
+  };
+  const resetPrinterForm = () => {
+    setEditingPrinterId(null);
+    setNewPrinterName("");
+    setNewPrinterStationLabel("");
+    setSelectedDetected("");
+    setBonProfileTouched(false);
+    setNewPrinterBonProfile("kitchen");
+    setNewPrinterIsReceipt(false);
+  };
+  const startEditPrinter = (printer: Printer) => {
+    const isReceipt = isReceiptPrinter(printer);
+    setEditingPrinterId(printer.id);
+    setNewPrinterName(String(printer.name || ""));
+    setNewPrinterIsReceipt(isReceipt);
+    setNewPrinterStationLabel(isReceipt ? "" : String(printer.type || ""));
+    setNewPrinterBonProfile(printerBonProfile(printer));
+    setBonProfileTouched(true);
+    setSelectedDetected("");
   };
 
   useEffect(() => {
@@ -386,11 +773,101 @@ const SettingsManager: React.FC = () => {
   );
   const [adminLogSearch, setAdminLogSearch] = useState("");
   const [adminLogActionFilter, setAdminLogActionFilter] = useState("all");
+  const [adminLogIntegrity, setAdminLogIntegrity] = useState<{
+    ok: boolean;
+    totalEntries: number;
+    signedEntries: number;
+    missingProofEntries: number;
+    brokenEntries: number;
+  } | null>(null);
+  const [securityOperationalStatus, setSecurityOperationalStatus] = useState<{
+    overall: "ok" | "warning" | "critical";
+    generatedAt: number;
+    checks: Array<{
+      key: string;
+      level: "ok" | "warning" | "critical";
+      message: string;
+    }>;
+  } | null>(null);
+  const [securityProofFile, setSecurityProofFile] = useState<File | null>(null);
+  const [securityExportFile, setSecurityExportFile] = useState<File | null>(null);
+  const [securityVerifyResult, setSecurityVerifyResult] = useState<{
+    ok: boolean;
+    message: string;
+  } | null>(null);
+  const [securityVerifyHistory, setSecurityVerifyHistory] = useState<
+    Array<{
+      at: number;
+      exportFileName: string;
+      proofFileName: string;
+      ok: boolean;
+      message: string;
+    }>
+  >([]);
+  const [securityStatusBusy, setSecurityStatusBusy] = useState(false);
+  const [securityCheckFilter, setSecurityCheckFilter] = useState<
+    "all" | "critical" | "warning" | "ok"
+  >("all");
+  const SECURITY_CHECK_FILTER_STORAGE_KEY = "pos.security.checkFilter.v1";
+  const SECURITY_VERIFY_HISTORY_STORAGE_KEY = "pos.security.verifyHistory.v1";
+  const [adminIntegrityReportBusy, setAdminIntegrityReportBusy] = useState(false);
+  const [adminIntegrityReport, setAdminIntegrityReport] = useState<{
+    ok: boolean;
+    kind: string;
+    totalDays: number;
+    totalEntries: number;
+    signedEntries: number;
+    missingProofEntries: number;
+    brokenEntries: number;
+    days: Array<{
+      dateKey: string;
+      ok: boolean;
+      totalEntries: number;
+      signedEntries: number;
+      missingProofEntries: number;
+      brokenEntries: number;
+    }>;
+  } | null>(null);
 
   const adminLogEntries = useMemo(
     () => parseAdminLogJsonl(adminLogContent),
     [adminLogContent],
   );
+  const securityStatusAgeMs = securityOperationalStatus
+    ? Math.max(0, Date.now() - Number(securityOperationalStatus.generatedAt || 0))
+    : 0;
+  const securityStatusAgeMinutes = Math.floor(securityStatusAgeMs / 60000);
+  const securityStatusStaleLevel: "none" | "warning" | "critical" = !securityOperationalStatus
+    ? "none"
+    : securityStatusAgeMinutes >= 15
+      ? "critical"
+      : securityStatusAgeMinutes >= 5
+        ? "warning"
+        : "none";
+  const securityChecksSummary = useMemo(() => {
+    const checks = securityOperationalStatus?.checks || [];
+    const counts = checks.reduce(
+      (acc, check) => {
+        if (check.level === "critical") acc.critical += 1;
+        else if (check.level === "warning") acc.warning += 1;
+        else acc.ok += 1;
+        return acc;
+      },
+      { critical: 0, warning: 0, ok: 0 },
+    );
+    const recommendation =
+      counts.critical > 0
+        ? "Traiter les points critiques en priorité avant exploitation."
+        : counts.warning > 0
+          ? "Planifier la correction des warnings pour stabiliser l'environnement."
+          : "Aucune action urgente: garder la surveillance active.";
+    return { ...counts, recommendation };
+  }, [securityOperationalStatus]);
+  const filteredSecurityChecks = useMemo(() => {
+    const checks = securityOperationalStatus?.checks || [];
+    if (securityCheckFilter === "all") return checks;
+    return checks.filter((check) => check.level === securityCheckFilter);
+  }, [securityOperationalStatus, securityCheckFilter]);
 
   const adminLogStructured = useMemo(() => {
     return adminLogEntries.map((entry, idx) => {
@@ -470,6 +947,100 @@ const SettingsManager: React.FC = () => {
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  };
+  const toHex = (buffer: ArrayBuffer) =>
+    Array.from(new Uint8Array(buffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  const computeSha256Hex = async (blob: Blob) => {
+    if (typeof crypto === "undefined" || !crypto?.subtle?.digest) {
+      throw new Error("SHA-256 indisponible sur cet environnement.");
+    }
+    const raw = await blob.arrayBuffer();
+    const digest = await crypto.subtle.digest("SHA-256", raw);
+    return toHex(digest);
+  };
+  const exportSha256Proof = async (blob: Blob, exportedFileName: string) => {
+    const sha256 = await computeSha256Hex(blob);
+    const proofContent = `${sha256}  ${exportedFileName}\n`;
+    const proofBlob = new Blob([proofContent], { type: "text/plain;charset=utf-8" });
+    downloadBlob(proofBlob, `${exportedFileName}.sha256.txt`);
+  };
+  const handleVerifySecuritySha256 = async () => {
+    if (!securityProofFile || !securityExportFile) {
+      notifyError("Sélectionnez le fichier exporté et le fichier .sha256.txt.");
+      return;
+    }
+    try {
+      const proofText = await securityProofFile.text();
+      const firstLine = String(proofText)
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => line.length > 0);
+      if (!firstLine) {
+        throw new Error("Fichier .sha256.txt vide.");
+      }
+      const match = firstLine.match(/^([a-fA-F0-9]{64})\s+(.+)$/);
+      if (!match) {
+        throw new Error("Format .sha256.txt invalide (attendu: <hash>  <nom_fichier>).");
+      }
+      const expected = String(match[1] || "").toLowerCase();
+      const expectedFileName = String(match[2] || "").trim();
+      const actual = (await computeSha256Hex(securityExportFile)).toLowerCase();
+      const fileNameMatches = expectedFileName === securityExportFile.name;
+      if (actual === expected && fileNameMatches) {
+        const message = "Signature SHA-256 valide (hash + nom de fichier conformes).";
+        setSecurityVerifyResult({ ok: true, message });
+        setSecurityVerifyHistory((prev) =>
+          [
+            {
+              at: Date.now(),
+              exportFileName: securityExportFile.name,
+              proofFileName: securityProofFile.name,
+              ok: true,
+              message,
+            },
+            ...prev,
+          ].slice(0, 8),
+        );
+        notifySuccess(message);
+        return;
+      }
+      const mismatchReason = !fileNameMatches
+        ? `Nom attendu: ${expectedFileName}, reçu: ${securityExportFile.name}.`
+        : "Le hash calculé ne correspond pas au hash attendu.";
+      const message = `Signature invalide. ${mismatchReason}`;
+      setSecurityVerifyResult({ ok: false, message });
+      setSecurityVerifyHistory((prev) =>
+        [
+          {
+            at: Date.now(),
+            exportFileName: securityExportFile.name,
+            proofFileName: securityProofFile.name,
+            ok: false,
+            message,
+          },
+          ...prev,
+        ].slice(0, 8),
+      );
+      notifyError(message);
+    } catch (e: any) {
+      const message = e?.message || "Vérification SHA-256 impossible.";
+      setSecurityVerifyResult({ ok: false, message });
+      setSecurityVerifyHistory((prev) =>
+        [
+          {
+            at: Date.now(),
+            exportFileName: securityExportFile?.name || "(inconnu)",
+            proofFileName: securityProofFile?.name || "(inconnu)",
+            ok: false,
+            message,
+          },
+          ...prev,
+        ].slice(0, 8),
+      );
+      notifyError(message);
+    }
   };
 
   const exportTechnicalJson = () => {
@@ -594,6 +1165,7 @@ const SettingsManager: React.FC = () => {
         date: adminLogDate || null,
         total: adminLogFiltered.length,
         ...adminLogStats,
+        integrity: adminLogIntegrity,
       },
       null,
       2,
@@ -698,9 +1270,27 @@ const SettingsManager: React.FC = () => {
         );
         const j = (await r.json().catch(() => ({}))) as {
           content?: string;
+          integrity?: {
+            ok?: boolean;
+            totalEntries?: number;
+            signedEntries?: number;
+            missingProofEntries?: number;
+            brokenEntries?: number;
+          };
         };
         if (!r.ok || cancelled) return;
         setAdminLogContent(typeof j.content === "string" ? j.content : "");
+        setAdminLogIntegrity(
+          j.integrity
+            ? {
+                ok: Boolean(j.integrity.ok),
+                totalEntries: Number(j.integrity.totalEntries || 0),
+                signedEntries: Number(j.integrity.signedEntries || 0),
+                missingProofEntries: Number(j.integrity.missingProofEntries || 0),
+                brokenEntries: Number(j.integrity.brokenEntries || 0),
+              }
+            : null,
+        );
       } catch {
         /* ignore */
       }
@@ -812,12 +1402,15 @@ const SettingsManager: React.FC = () => {
   const [genFiscal, setGenFiscal] = useState({
     taxId: "",
     tvaRate: 0,
+    tvaCatalog: [{ code: "TVA_STD", label: "TVA standard", rate: 0 }] as TvaCatalogEntry[],
+    fiscalCategoryCatalog: [] as FiscalCategoryEntry[],
     timbreValue: 0,
     applyTvaToTicket: false,
     applyTvaToInvoice: false,
     applyTimbreToTicket: false,
     applyTimbreToInvoice: false,
     printPreviewOnValidate: false,
+    printAutoOnPreview: true,
   });
   const [genTouch, setGenTouch] = useState({
     touchUiMode: false,
@@ -841,6 +1434,35 @@ const SettingsManager: React.FC = () => {
     kitchenBarPrintTemplates: {},
     paymentSoundEnabled: false,
   });
+  const [designerTemplates, setDesignerTemplates] = useState<{
+    clientHtml: string;
+    kitchenHtml: string;
+    barHtml: string;
+  }>({
+    clientHtml: "",
+    kitchenHtml: "",
+    barHtml: "",
+  });
+  const [printTemplateSource, setPrintTemplateSource] = useState<{
+    client: "BUILTIN" | "DESIGNER";
+    kitchen: "BUILTIN" | "DESIGNER";
+    bar: "BUILTIN" | "DESIGNER";
+  }>({ client: "BUILTIN", kitchen: "BUILTIN", bar: "BUILTIN" });
+  const [designerModalKind, setDesignerModalKind] = useState<
+    null | "client" | "kitchen" | "bar"
+  >(null);
+  const [productionEditorKind, setProductionEditorKind] = useState<
+    "kitchen" | "bar"
+  >("kitchen");
+  const printTemplateKinds = ["client", "kitchen", "bar"] as const;
+  const printTemplateKindLabels: Record<
+    (typeof printTemplateKinds)[number],
+    string
+  > = {
+    client: "Client",
+    kitchen: "Cuisine",
+    bar: "Bar",
+  };
 
   const hydrateGeneralSections = () => {
     setGenIdentity({
@@ -869,12 +1491,17 @@ const SettingsManager: React.FC = () => {
     setGenFiscal({
       taxId: settings.taxId ?? "",
       tvaRate: settings.tvaRate ?? 0,
+      tvaCatalog: normalizeTvaCatalogFromSettings((settings as any).tvaCatalog, settings.tvaRate ?? 0),
+      fiscalCategoryCatalog: normalizeFiscalCategoryCatalogFromSettings(
+        (settings as any).fiscalCategoryCatalog,
+      ),
       timbreValue: settings.timbreValue ?? 0,
       applyTvaToTicket: Boolean(settings.applyTvaToTicket),
       applyTvaToInvoice: Boolean(settings.applyTvaToInvoice),
       applyTimbreToTicket: Boolean(settings.applyTimbreToTicket),
       applyTimbreToInvoice: Boolean(settings.applyTimbreToInvoice),
       printPreviewOnValidate: Boolean(settings.printPreviewOnValidate),
+      printAutoOnPreview: (settings as any).printAutoOnPreview !== false,
     });
     setGenTouch({
       touchUiMode: Boolean(settings.touchUiMode),
@@ -900,6 +1527,18 @@ const SettingsManager: React.FC = () => {
         JSON.stringify(settings.kitchenBarPrintTemplates || {}),
       ),
       paymentSoundEnabled: Boolean(settings.paymentSoundEnabled),
+    });
+    const designer = ((settings as any).designerPrintTemplates || {}) as any;
+    setDesignerTemplates({
+      clientHtml: String(designer?.clientHtml || ""),
+      kitchenHtml: String(designer?.kitchenHtml || ""),
+      barHtml: String(designer?.barHtml || ""),
+    });
+    const src = ((settings as any).printTemplateSource || {}) as any;
+    setPrintTemplateSource({
+      client:  (String(src?.client  || "").toUpperCase() === "DESIGNER" ? "DESIGNER" : "BUILTIN") as "BUILTIN" | "DESIGNER",
+      kitchen: (String(src?.kitchen || "").toUpperCase() === "DESIGNER" ? "DESIGNER" : "BUILTIN") as "BUILTIN" | "DESIGNER",
+      bar:     (String(src?.bar     || "").toUpperCase() === "DESIGNER" ? "DESIGNER" : "BUILTIN") as "BUILTIN" | "DESIGNER",
     });
   };
 
@@ -1414,6 +2053,7 @@ const SettingsManager: React.FC = () => {
             Number(genTouch.clientTicketPrintCopies || 1),
           ),
           printPreviewOnValidate: Boolean(genFiscal.printPreviewOnValidate),
+          printAutoOnPreview: Boolean(genFiscal.printAutoOnPreview),
           clientTicketLayout: {
             ...(genTicket.clientTicketLayout || {}),
           },
@@ -1487,6 +2127,12 @@ const SettingsManager: React.FC = () => {
           printPreviewOnValidate: Boolean(source?.printPreviewOnValidate),
         }));
       }
+      if (source?.printAutoOnPreview !== undefined) {
+        setGenFiscal((p) => ({
+          ...p,
+          printAutoOnPreview: Boolean(source?.printAutoOnPreview),
+        }));
+      }
       if (source?.clientTicketPrintCopies !== undefined) {
         setGenTouch((p) => ({
           ...p,
@@ -1531,30 +2177,60 @@ const SettingsManager: React.FC = () => {
   const handleDownloadExternalClientHtmlTemplateSample = () => {
     try {
       const sample = [
+        "<!doctype html>",
         "<html>",
-        "  <body style=\"font-family: Arial, sans-serif; font-size: 12px; margin: 8px;\">",
-        "    <h3 style=\"margin: 0 0 6px 0;\">{{restaurantName}}</h3>",
-        "    <div>{{headerText}}</div>",
-        "    <div>Ticket: {{ticketCode}}</div>",
-        "    <div>Commande: {{orderNumber}}</div>",
-        "    <div>Table: {{tableNumber}}</div>",
-        "    <div>Serveur: {{serverName}}</div>",
-        "    <div>Date: {{createdAt}}</div>",
-        "    <hr/>",
-        "    <pre style=\"white-space: pre-wrap; font-family: inherit;\">{{itemsLines}}</pre>",
-        "    <hr/>",
-        "    <div>Sous-total: {{subtotal}} {{currency}}</div>",
-        "    <div>Remise: {{discount}} {{currency}}</div>",
-        "    <div>Timbre: {{timbre}} {{currency}}</div>",
-        "    <div style=\"font-weight: 700;\">Total: {{total}} {{currency}}</div>",
-        "    <div>Règlement: {{amount}} {{currency}}</div>",
-        "    <div style=\"margin-top: 8px;\">{{footerText}}</div>",
+        "  <head>",
+        "    <meta charset=\"utf-8\" />",
+        "    <title>Ticket Client</title>",
+        "    <style>",
+        "      body { font-family: Arial, sans-serif; font-size: 12px; color: #0f172a; margin: 0; padding: 10px; }",
+        "      .card { border: 1px solid #dbe2ea; border-radius: 14px; padding: 12px; }",
+        "      .center { text-align: center; }",
+        "      .logo { width: 38px; height: 38px; border-radius: 999px; object-fit: cover; margin: 0 auto 6px; display: block; }",
+        "      .name { font-size: 22px; font-weight: 800; letter-spacing: .3px; margin: 2px 0; }",
+        "      .meta { font-size: 12px; color: #475569; margin: 2px 0; }",
+        "      .divider { border: none; border-top: 1px dashed #cbd5e1; margin: 10px 0; }",
+        "      .row { display: flex; justify-content: space-between; gap: 10px; margin: 4px 0; }",
+        "      .line-label { font-weight: 700; }",
+        "      .line-value { font-weight: 700; white-space: nowrap; }",
+        "      .totals .row { margin: 2px 0; }",
+        "      .total { font-size: 16px; font-weight: 900; color: #1d4ed8; }",
+        "      .muted { color: #64748b; }",
+        "      .footer { margin-top: 10px; text-align: center; font-weight: 700; color: #475569; }",
+        "      .items pre { margin: 0; white-space: pre-wrap; font-family: Arial, sans-serif; }",
+        "    </style>",
+        "  </head>",
+        "  <body>",
+        "    <div class=\"card\">",
+        "      <div class=\"center\">",
+        "        <img class=\"logo\" src=\"https://dummyimage.com/64x64/ef4444/ffffff&text=F1\" alt=\"logo\"/>",
+        "        <div class=\"name\">{{restaurantName}}</div>",
+        "        <div class=\"meta\">{{createdAt}}</div>",
+        "        <div class=\"meta\">Ticket: {{ticketCode}}</div>",
+        "        <div class=\"meta\">{{address}}</div>",
+        "        <div class=\"meta\">Tel: {{phone}}</div>",
+        "        <div class=\"meta\">MF: {{taxId}}</div>",
+        "        <div class=\"meta\">Serveur: {{serverName}}</div>",
+        "        <div class=\"meta\">Table: {{tableNumber}}</div>",
+        "        <div class=\"meta\">Paiement: {{amount}} {{currency}}</div>",
+        "      </div>",
+        "      <hr class=\"divider\"/>",
+        "      <div class=\"items\"><pre>{{itemsLines}}</pre></div>",
+        "      <hr class=\"divider\"/>",
+        "      <div class=\"totals\">",
+        "        <div class=\"row\"><span class=\"line-label\">Prix HT</span><span class=\"line-value\">{{subtotal}} {{currency}}</span></div>",
+        "        <div class=\"row\"><span class=\"line-label\" style=\"color:#f97316\">Remise ticket</span><span class=\"line-value\" style=\"color:#f97316\">-{{discount}} {{currency}}</span></div>",
+        "        <div class=\"row\"><span class=\"line-label\">Timbre</span><span class=\"line-value\">{{timbre}} {{currency}}</span></div>",
+        "        <div class=\"row total\"><span>Prix TTC</span><span>{{total}} {{currency}}</span></div>",
+        "      </div>",
+        "      <div class=\"footer\">{{footerText}}</div>",
+        "    </div>",
         "  </body>",
         "</html>",
         "",
       ].join("\n");
       const blob = new Blob([sample], { type: "text/html;charset=utf-8;" });
-      downloadBlob(blob, "client-receipt-template.sample.html");
+      downloadBlob(blob, "client-receipt-template.html");
       notifySuccess(
         "Template HTML client téléchargé. Déposez-le dans C:\\ProgramData\\AxiaFlex\\templates\\client-receipt-template.html",
       );
@@ -1590,24 +2266,39 @@ const SettingsManager: React.FC = () => {
   const handleDownloadExternalKitchenHtmlTemplateSample = () => {
     try {
       const sample = [
+        "<!doctype html>",
         "<html>",
-        "  <body style=\"font-family: Arial, sans-serif; font-size: 12px; margin: 8px;\">",
-        "    <h3>{{title}}</h3>",
-        "    <div>Commande #{{orderRef}}</div>",
-        "    <div>Type: {{orderType}}</div>",
-        "    <div>Table: {{tableNumber}}</div>",
-        "    <div>Serveur: {{serverName}}</div>",
-        "    <div>Heure: {{createdAt}}</div>",
-        "    <hr/>",
-        "    <pre style=\"white-space: pre-wrap; font-family: inherit;\">{{itemsLines}}</pre>",
-        "    <hr/>",
-        "    <div>{{footerText}}</div>",
+        "  <head>",
+        "    <meta charset=\"utf-8\" />",
+        "    <style>",
+        "      body { font-family: Arial, sans-serif; font-size: 12px; margin: 0; padding: 10px; color: #111827; }",
+        "      .card { border: 1px solid #d1d5db; border-radius: 10px; padding: 10px; }",
+        "      .title { text-align:center; font-size: 16px; font-weight: 900; margin-bottom: 6px; }",
+        "      .meta { font-size: 12px; color: #374151; margin: 2px 0; }",
+        "      .divider { border: none; border-top: 1px dashed #cbd5e1; margin: 8px 0; }",
+        "      pre { margin: 0; white-space: pre-wrap; font-family: Arial, sans-serif; font-weight: 700; }",
+        "      .foot { margin-top: 8px; font-size: 11px; color: #475569; }",
+        "    </style>",
+        "  </head>",
+        "  <body>",
+        "    <div class=\"card\">",
+        "      <div class=\"title\">{{title}}</div>",
+        "      <div class=\"meta\">Commande #{{orderRef}}</div>",
+        "      <div class=\"meta\">Type: {{orderType}}</div>",
+        "      <div class=\"meta\">Table: {{tableNumber}}</div>",
+        "      <div class=\"meta\">Serveur: {{serverName}}</div>",
+        "      <div class=\"meta\">Heure: {{createdAt}}</div>",
+        "      <hr class=\"divider\"/>",
+        "      <pre>{{itemsLines}}</pre>",
+        "      <hr class=\"divider\"/>",
+        "      <div class=\"foot\">{{footerText}}</div>",
+        "    </div>",
         "  </body>",
         "</html>",
         "",
       ].join("\n");
       const blob = new Blob([sample], { type: "text/html;charset=utf-8;" });
-      downloadBlob(blob, "kitchen-ticket-template.sample.html");
+      downloadBlob(blob, "kitchen-ticket-template.html");
       notifySuccess(
         "Template HTML cuisine téléchargé. Déposez-le dans C:\\ProgramData\\AxiaFlex\\templates\\kitchen-ticket-template.html",
       );
@@ -1643,29 +2334,375 @@ const SettingsManager: React.FC = () => {
   const handleDownloadExternalBarHtmlTemplateSample = () => {
     try {
       const sample = [
+        "<!doctype html>",
         "<html>",
-        "  <body style=\"font-family: Arial, sans-serif; font-size: 12px; margin: 8px;\">",
-        "    <h3>{{title}}</h3>",
-        "    <div>Commande #{{orderRef}}</div>",
-        "    <div>Type: {{orderType}}</div>",
-        "    <div>Table: {{tableNumber}}</div>",
-        "    <div>Serveur: {{serverName}}</div>",
-        "    <div>Heure: {{createdAt}}</div>",
-        "    <hr/>",
-        "    <pre style=\"white-space: pre-wrap; font-family: inherit;\">{{itemsLines}}</pre>",
-        "    <hr/>",
-        "    <div>{{footerText}}</div>",
+        "  <head>",
+        "    <meta charset=\"utf-8\" />",
+        "    <style>",
+        "      body { font-family: Arial, sans-serif; font-size: 12px; margin: 0; padding: 10px; color: #111827; }",
+        "      .card { border: 1px solid #d1d5db; border-radius: 10px; padding: 10px; }",
+        "      .title { text-align:center; font-size: 16px; font-weight: 900; margin-bottom: 6px; }",
+        "      .meta { font-size: 12px; color: #374151; margin: 2px 0; }",
+        "      .divider { border: none; border-top: 1px dashed #cbd5e1; margin: 8px 0; }",
+        "      pre { margin: 0; white-space: pre-wrap; font-family: Arial, sans-serif; font-weight: 700; }",
+        "      .foot { margin-top: 8px; font-size: 11px; color: #475569; }",
+        "    </style>",
+        "  </head>",
+        "  <body>",
+        "    <div class=\"card\">",
+        "      <div class=\"title\">{{title}}</div>",
+        "      <div class=\"meta\">Commande #{{orderRef}}</div>",
+        "      <div class=\"meta\">Type: {{orderType}}</div>",
+        "      <div class=\"meta\">Table: {{tableNumber}}</div>",
+        "      <div class=\"meta\">Serveur: {{serverName}}</div>",
+        "      <div class=\"meta\">Heure: {{createdAt}}</div>",
+        "      <hr class=\"divider\"/>",
+        "      <pre>{{itemsLines}}</pre>",
+        "      <hr class=\"divider\"/>",
+        "      <div class=\"foot\">{{footerText}}</div>",
+        "    </div>",
         "  </body>",
         "</html>",
         "",
       ].join("\n");
       const blob = new Blob([sample], { type: "text/html;charset=utf-8;" });
-      downloadBlob(blob, "bar-ticket-template.sample.html");
+      downloadBlob(blob, "bar-ticket-template.html");
       notifySuccess(
         "Template HTML bar téléchargé. Déposez-le dans C:\\ProgramData\\AxiaFlex\\templates\\bar-ticket-template.html",
       );
     } catch {
       notifyError("Téléchargement du template HTML bar impossible.");
+    }
+  };
+  const handleTemplatePreviewOrDownload = async (
+    kind: "client" | "kitchen" | "bar",
+    format: "html" | "pdf",
+    mode: "preview" | "download",
+  ) => {
+    try {
+      const response = await fetch(
+        `${SETTINGS_LOG_API_BASE}/pos/settings/print-template/preview?kind=${encodeURIComponent(kind)}&format=${encodeURIComponent(format)}`,
+        {
+          method: "GET",
+          cache: "no-store",
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Impossible de générer le fichier (${response.status})`);
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") || "";
+      const match = disposition.match(/filename="([^"]+)"/i);
+      const fileName =
+        match?.[1] || `${kind}-template-preview.${format === "pdf" ? "pdf" : "html"}`;
+      if (mode === "download") {
+        downloadBlob(blob, fileName);
+        notifySuccess(`Template ${kind} ${format.toUpperCase()} téléchargé.`);
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e: any) {
+      notifyError(
+        e?.message || "Aperçu/téléchargement du template impossible.",
+      );
+    }
+  };
+  const handleTestDesktopBridge = async () => {
+    try {
+      const res = await fetch(
+        `${SETTINGS_LOG_API_BASE}/pos/settings/desktop-bridge/test`,
+        {
+          method: "GET",
+          cache: "no-store",
+        },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(String((json as any)?.error || `Erreur ${res.status}`));
+      }
+      notifySuccess("Desktop Bridge connecté et prêt.");
+    } catch (e: any) {
+      notifyError(e?.message || "Desktop Bridge indisponible.");
+    }
+  };
+  const handleLoadSecurityStatus = async (options?: { silent?: boolean }) => {
+    try {
+      setSecurityStatusBusy(true);
+      const userId = String(currentUser?.id || "").trim();
+      if (!userId) throw new Error("Utilisateur admin requis.");
+      const res = await fetch(
+        `${SETTINGS_LOG_API_BASE}/pos/settings/security-status?userId=${encodeURIComponent(userId)}`,
+        {
+          method: "GET",
+          cache: "no-store",
+        },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(String((json as any)?.error || `Erreur ${res.status}`));
+      }
+      setSecurityOperationalStatus({
+        overall:
+          String((json as any)?.overall || "").toLowerCase() === "critical"
+            ? "critical"
+            : String((json as any)?.overall || "").toLowerCase() === "warning"
+              ? "warning"
+              : "ok",
+        generatedAt: Number((json as any)?.generatedAt || Date.now()),
+        checks: Array.isArray((json as any)?.checks)
+          ? (json as any).checks.map((c: any) => ({
+              key: String(c?.key || ""),
+              level:
+                String(c?.level || "").toLowerCase() === "critical"
+                  ? "critical"
+                  : String(c?.level || "").toLowerCase() === "warning"
+                    ? "warning"
+                    : "ok",
+              message: String(c?.message || ""),
+            }))
+          : [],
+      });
+      if (!options?.silent) notifySuccess("Statut sécurité chargé.");
+    } catch (e: any) {
+      if (!options?.silent) {
+        notifyError(e?.message || "Impossible de charger le statut sécurité.");
+      }
+    } finally {
+      setSecurityStatusBusy(false);
+    }
+  };
+  const handleExportSecurityStatus = async () => {
+    if (!securityOperationalStatus) {
+      notifyError("Aucun statut sécurité à exporter.");
+      return;
+    }
+    try {
+      const blob = new Blob(
+        [
+          JSON.stringify(
+            {
+              exportedAt: Date.now(),
+              source: "settings-security-status",
+              ...securityOperationalStatus,
+            },
+            null,
+            2,
+          ),
+        ],
+        { type: "application/json;charset=utf-8" },
+      );
+      const dateKey = new Date().toISOString().slice(0, 10);
+      const filename = `security-status-${dateKey}.json`;
+      downloadBlob(blob, filename);
+      await exportSha256Proof(blob, filename);
+      notifySuccess("Rapport sécurité JSON + signature SHA-256 exportés.");
+    } catch {
+      notifyError("Export du rapport sécurité impossible.");
+    }
+  };
+  const handleExportSecurityStatusPdf = async () => {
+    if (!securityOperationalStatus) {
+      notifyError("Aucun statut sécurité à exporter.");
+      return;
+    }
+    try {
+      const escapePdf = (input: string) =>
+        input
+          .replace(/\\/g, "\\\\")
+          .replace(/\(/g, "\\(")
+          .replace(/\)/g, "\\)");
+      const generatedAt = new Date(securityOperationalStatus.generatedAt).toLocaleString();
+      const lines = [
+        "Rapport sécurité opérationnel",
+        `Exporté le: ${new Date().toLocaleString()}`,
+        `Statut global: ${securityOperationalStatus.overall}`,
+        `Généré le: ${generatedAt}`,
+        "",
+        "Checks:",
+        ...securityOperationalStatus.checks.map(
+          (check, idx) => `${idx + 1}. [${check.level}] ${check.key} - ${check.message}`,
+        ),
+      ];
+      const maxChars = 100;
+      const wrapped: string[] = [];
+      for (const line of lines) {
+        if (line.length <= maxChars) {
+          wrapped.push(line);
+          continue;
+        }
+        let chunk = "";
+        for (const part of line.split(" ")) {
+          if (!chunk) {
+            chunk = part;
+            continue;
+          }
+          if ((chunk + " " + part).length > maxChars) {
+            wrapped.push(chunk);
+            chunk = part;
+          } else {
+            chunk += " " + part;
+          }
+        }
+        if (chunk) wrapped.push(chunk);
+      }
+      const pageHeight = 842;
+      const top = 800;
+      const lineStep = 14;
+      const linesPerPage = 52;
+      const pages: string[] = [];
+      for (let i = 0; i < wrapped.length; i += linesPerPage) {
+        const chunk = wrapped.slice(i, i + linesPerPage);
+        const textOps = ["BT", "/F1 10 Tf"];
+        let y = top;
+        for (const ln of chunk) {
+          textOps.push(`1 0 0 1 40 ${y} Tm (${escapePdf(ln)}) Tj`);
+          y -= lineStep;
+        }
+        textOps.push("ET");
+        pages.push(textOps.join("\n"));
+      }
+      if (pages.length === 0) pages.push("BT /F1 10 Tf 1 0 0 1 40 800 Tm (Aucune donnée) Tj ET");
+      const objects: string[] = [];
+      objects.push("<< /Type /Catalog /Pages 2 0 R >>");
+      const kids = pages.map((_, i) => `${3 + i * 2} 0 R`).join(" ");
+      objects.push(`<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>`);
+      pages.forEach((content, i) => {
+        const pageId = 3 + i * 2;
+        const contentId = 4 + i * 2;
+        objects[pageId - 1] =
+          `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 ${pageHeight}] /Resources << /Font << /F1 ${3 + pages.length * 2} 0 R >> >> /Contents ${contentId} 0 R >>`;
+        objects[contentId - 1] = `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
+      });
+      objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+      let pdf = "%PDF-1.4\n";
+      const offsets: number[] = [0];
+      for (let i = 0; i < objects.length; i++) {
+        offsets.push(pdf.length);
+        pdf += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+      }
+      const xrefPos = pdf.length;
+      pdf += `xref\n0 ${objects.length + 1}\n`;
+      pdf += "0000000000 65535 f \n";
+      for (let i = 1; i < offsets.length; i++) {
+        pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+      }
+      pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF`;
+      const blob = new Blob([pdf], { type: "application/pdf" });
+      const dateKey = new Date().toISOString().slice(0, 10);
+      const filename = `security-status-${dateKey}.pdf`;
+      downloadBlob(blob, filename);
+      await exportSha256Proof(blob, filename);
+      notifySuccess("Rapport sécurité PDF + signature SHA-256 exportés.");
+    } catch {
+      notifyError("Export PDF du rapport sécurité impossible.");
+    }
+  };
+  const handleCopySecurityDiagnostic = async () => {
+    if (!securityOperationalStatus) {
+      notifyError("Aucun statut sécurité chargé.");
+      return;
+    }
+    try {
+      const diagnostic = {
+        copiedAt: Date.now(),
+        scope: "settings-security-operational-status",
+        freshness: {
+          ageMs: securityStatusAgeMs,
+          ageMinutes: securityStatusAgeMinutes,
+          staleLevel: securityStatusStaleLevel,
+        },
+        status: securityOperationalStatus,
+      };
+      await navigator.clipboard.writeText(JSON.stringify(diagnostic, null, 2));
+      notifySuccess("Diagnostic sécurité copié.");
+    } catch {
+      notifyError("Copie du diagnostic sécurité impossible.");
+    }
+  };
+  const handleCopyCriticalSecurityChecks = async () => {
+    if (!securityOperationalStatus) {
+      notifyError("Aucun statut sécurité chargé.");
+      return;
+    }
+    try {
+      const criticalChecks = (securityOperationalStatus.checks || []).filter(
+        (check) => check.level === "critical",
+      );
+      if (criticalChecks.length === 0) {
+        notifySuccess("Aucun check critique à copier.");
+        return;
+      }
+      const payload = {
+        copiedAt: Date.now(),
+        scope: "settings-security-critical-checks",
+        totalCritical: criticalChecks.length,
+        checks: criticalChecks,
+      };
+      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      notifySuccess("Checks critiques copiés.");
+    } catch {
+      notifyError("Copie des checks critiques impossible.");
+    }
+  };
+  const handleDownloadCriticalSecurityChecks = async () => {
+    if (!securityOperationalStatus) {
+      notifyError("Aucun statut sécurité chargé.");
+      return;
+    }
+    try {
+      const criticalChecks = (securityOperationalStatus.checks || []).filter(
+        (check) => check.level === "critical",
+      );
+      if (criticalChecks.length === 0) {
+        notifySuccess("Aucun check critique à exporter.");
+        return;
+      }
+      const payload = {
+        exportedAt: Date.now(),
+        scope: "settings-security-critical-checks",
+        totalCritical: criticalChecks.length,
+        checks: criticalChecks,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: "application/json;charset=utf-8",
+      });
+      const dateKey = new Date().toISOString().slice(0, 10);
+      const fileName = `security-critical-checks-${dateKey}.json`;
+      downloadBlob(blob, fileName);
+      await exportSha256Proof(blob, fileName);
+      notifySuccess("Checks critiques + signature SHA-256 téléchargés.");
+    } catch {
+      notifyError("Export des checks critiques impossible.");
+    }
+  };
+  const handleDownloadSecurityDiagnostic = async () => {
+    if (!securityOperationalStatus) {
+      notifyError("Aucun statut sécurité chargé.");
+      return;
+    }
+    try {
+      const diagnostic = {
+        exportedAt: Date.now(),
+        scope: "settings-security-operational-status",
+        freshness: {
+          ageMs: securityStatusAgeMs,
+          ageMinutes: securityStatusAgeMinutes,
+          staleLevel: securityStatusStaleLevel,
+        },
+        status: securityOperationalStatus,
+      };
+      const blob = new Blob([JSON.stringify(diagnostic, null, 2)], {
+        type: "application/json;charset=utf-8",
+      });
+      const dateKey = new Date().toISOString().slice(0, 10);
+      const fileName = `security-diagnostic-${dateKey}.json`;
+      downloadBlob(blob, fileName);
+      await exportSha256Proof(blob, fileName);
+      notifySuccess("Diagnostic sécurité + signature SHA-256 téléchargés.");
+    } catch {
+      notifyError("Téléchargement du diagnostic sécurité impossible.");
     }
   };
 
@@ -1715,6 +2752,70 @@ const SettingsManager: React.FC = () => {
     if (activeTab !== "paymentInstruments") return;
     refreshPaymentInstruments();
   }, [activeTab]);
+  useEffect(() => {
+    try {
+      const storedFilter = String(
+        window.localStorage.getItem(SECURITY_CHECK_FILTER_STORAGE_KEY) || "",
+      ).toLowerCase();
+      if (
+        storedFilter === "all" ||
+        storedFilter === "critical" ||
+        storedFilter === "warning" ||
+        storedFilter === "ok"
+      ) {
+        setSecurityCheckFilter(storedFilter);
+      }
+      const historyRaw = window.localStorage.getItem(
+        SECURITY_VERIFY_HISTORY_STORAGE_KEY,
+      );
+      if (historyRaw) {
+        const parsed = JSON.parse(historyRaw);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed
+            .map((row: any) => ({
+              at: Number(row?.at || 0),
+              exportFileName: String(row?.exportFileName || ""),
+              proofFileName: String(row?.proofFileName || ""),
+              ok: Boolean(row?.ok),
+              message: String(row?.message || ""),
+            }))
+            .filter((row) => row.at > 0)
+            .slice(0, 8);
+          setSecurityVerifyHistory(cleaned);
+        }
+      }
+    } catch {
+      // no-op: corrupted local storage should not break settings screen
+    }
+  }, []);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        SECURITY_CHECK_FILTER_STORAGE_KEY,
+        securityCheckFilter,
+      );
+    } catch {
+      // no-op
+    }
+  }, [securityCheckFilter]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        SECURITY_VERIFY_HISTORY_STORAGE_KEY,
+        JSON.stringify(securityVerifyHistory.slice(0, 8)),
+      );
+    } catch {
+      // no-op
+    }
+  }, [securityVerifyHistory]);
+  useEffect(() => {
+    if (activeTab !== "hardware") return;
+    handleLoadSecurityStatus({ silent: true }).catch(() => undefined);
+    const intervalId = window.setInterval(() => {
+      handleLoadSecurityStatus({ silent: true }).catch(() => undefined);
+    }, 120000);
+    return () => window.clearInterval(intervalId);
+  }, [activeTab, currentUser?.id]);
 
   useEffect(() => {
     const ext = settings.externalRestaurantCardApi;
@@ -1751,6 +2852,7 @@ const SettingsManager: React.FC = () => {
       showFiscalQrCode: Boolean(L.showFiscalQrCode ?? false),
     };
   }, [genTicket.clientTicketLayout]);
+  const isNacefTicketTemplateLocked = Boolean((settings as any)?.nacefEnabled);
   const previewShellClass = useMemo(() => {
     switch (genTicket.clientTicketTemplate) {
       case "COMPACT":
@@ -1808,6 +2910,80 @@ const SettingsManager: React.FC = () => {
       showItemNotes: b.showItemNotes ?? true,
     };
   }, [genKitchen.kitchenBarPrintTemplates]);
+  const printDiagnosticSnapshot = useMemo(
+    () =>
+      JSON.stringify(
+        {
+          routing: {
+            printRoutingMode: (settings as any)?.printRoutingMode || "LOCAL",
+            desktopPrintBridgeEnabled: Boolean(
+              (settings as any)?.desktopPrintBridge?.enabled,
+            ),
+          },
+          sources: {
+            saved: (settings as any)?.printTemplateSource || {},
+            draft: printTemplateSource,
+          },
+          client: {
+            template: settings.clientTicketTemplate || "CLASSIC",
+            layout: settings.clientTicketLayout || {},
+          },
+          production: {
+            templates: settings.kitchenBarPrintTemplates || {},
+          },
+          designer: {
+            clientHtmlLength: String((settings as any)?.designerPrintTemplates?.clientHtml || "")
+              .trim()
+              .length,
+            kitchenHtmlLength: String((settings as any)?.designerPrintTemplates?.kitchenHtml || "")
+              .trim()
+              .length,
+            barHtmlLength: String((settings as any)?.designerPrintTemplates?.barHtml || "")
+              .trim()
+              .length,
+          },
+        },
+        null,
+        2,
+      ),
+    [printTemplateSource, settings],
+  );
+  const activeProductionTpl =
+    productionEditorKind === "kitchen" ? kitchenTpl : barTpl;
+  const updateProductionTemplate = (
+    kind: "kitchen" | "bar",
+    patch: Record<string, unknown>,
+  ) => {
+    setGenKitchen((g) => ({
+      ...g,
+      kitchenBarPrintTemplates: {
+        ...(g.kitchenBarPrintTemplates as object),
+        [kind]: {
+          ...((g.kitchenBarPrintTemplates as any)?.[kind] || {}),
+          ...patch,
+        },
+      },
+    }));
+  };
+  const duplicateProductionTemplate = (
+    from: "kitchen" | "bar",
+    to: "kitchen" | "bar",
+  ) => {
+    const source =
+      from === "kitchen"
+        ? (genKitchen.kitchenBarPrintTemplates as any)?.kitchen || {}
+        : (genKitchen.kitchenBarPrintTemplates as any)?.bar || {};
+    updateProductionTemplate(to, {
+      title: source.title,
+      footerText: source.footerText,
+      showOrderRef: source.showOrderRef,
+      showTime: source.showTime,
+      showTable: source.showTable,
+      showServer: source.showServer,
+      showItemQty: source.showItemQty,
+      showItemNotes: source.showItemNotes,
+    });
+  };
 
   const activeTabMeta =
     SETTINGS_TAB_ITEMS.find((tab) => tab.id === activeTab) ||
@@ -1815,7 +2991,9 @@ const SettingsManager: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full gap-4 sm:gap-8">
-      <div className="flex bg-white p-1 rounded-2xl border border-slate-200 shadow-sm shrink-0 w-max overflow-x-auto max-w-full scrollbar-hide">
+      <div
+        className={`flex bg-white p-1 rounded-2xl border border-slate-200 shadow-sm shrink-0 w-max overflow-x-auto max-w-full scrollbar-hide transition ${tourGlowClass(0)}`}
+      >
         {SETTINGS_TAB_ITEMS.map((tab) => (
           <button
             key={tab.id}
@@ -1827,7 +3005,9 @@ const SettingsManager: React.FC = () => {
         ))}
       </div>
 
-      <div className="bg-white border border-slate-100 rounded-2xl px-4 sm:px-5 py-4">
+      <div
+        className={`bg-white border border-slate-100 rounded-2xl px-4 sm:px-5 py-4 transition ${tourGlowClass(1)}`}
+      >
         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
           Section active
         </p>
@@ -1839,7 +3019,73 @@ const SettingsManager: React.FC = () => {
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto pr-1 sm:pr-2 pb-20 space-y-5 sm:space-y-8 scrollbar-hide">
+      <div className="bg-white border border-indigo-100 rounded-2xl px-4 sm:px-5 py-4">
+        <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-xs text-indigo-700 font-semibold">
+            Besoin d'aide pour compléter ce formulaire ?
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowFormHelp((v) => !v)}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-indigo-200 bg-white text-indigo-700 text-xs font-black hover:bg-indigo-50"
+          >
+            <HelpCircle size={14} />
+            {showFormHelp ? "Masquer l'aide" : "Aide guidée"}
+          </button>
+        </div>
+        {showFormHelp && (
+          <div className="mt-3 rounded-2xl border border-indigo-200 bg-white shadow-sm p-4 space-y-3 animate-in fade-in duration-200">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+              {[
+                "Etape 1: choisir l'onglet de parametres adapte.",
+                "Etape 2: modifier les champs de la section.",
+                "Etape 3: enregistrer pour appliquer les changements.",
+              ].map((step, index) => (
+                <button
+                  key={step}
+                  type="button"
+                  onClick={() => goToTourStep(index)}
+                  className={`text-left rounded-xl border px-3 py-2 transition ${
+                    tourStep === index
+                      ? "border-amber-300 bg-amber-50"
+                      : "border-slate-200 hover:border-indigo-200 hover:bg-indigo-50/60"
+                  }`}
+                >
+                  <p className="text-[11px] font-black text-slate-700">{step}</p>
+                </button>
+              ))}
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 flex items-center gap-2">
+              <Lightbulb size={14} className="text-amber-600 animate-pulse" />
+              <p className="text-[11px] font-black text-amber-700">
+                Etape actuelle: {tourStep + 1}/3
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => goToTourStep(tourStep - 1)}
+                disabled={tourStep <= 0}
+                className="px-3 py-1.5 rounded-lg border border-indigo-200 bg-white text-xs font-black text-indigo-700 disabled:opacity-40"
+              >
+                Précédent
+              </button>
+              <button
+                type="button"
+                onClick={() => goToTourStep(tourStep + 1)}
+                disabled={tourStep >= 2}
+                className="px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-xs font-black text-indigo-700 disabled:opacity-40"
+              >
+                Suivant
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div
+        className={`flex-1 overflow-y-auto pr-1 sm:pr-2 pb-20 space-y-5 sm:space-y-8 scrollbar-hide transition ${tourGlowClass(2)}`}
+      >
         {activeTab === "general" && (
           <div className="w-full bg-white p-4 sm:p-10 rounded-[1.5rem] sm:rounded-[3rem] shadow-sm border border-slate-100 space-y-5 sm:space-y-8">
             <h3 className="text-2xl font-black text-slate-800 flex items-center gap-3">
@@ -2277,22 +3523,57 @@ const SettingsManager: React.FC = () => {
               <GeneralSettingsSection
                 title="Fiscalité & options d’impression"
                 description="Matricule fiscal, TVA, timbre et application sur tickets / factures."
-                onSave={() =>
-                  updateSettings({
+                onSave={() => {
+                  const normalizedFiscalCategoryCatalog = genFiscal.fiscalCategoryCatalog
+                    .map((entry) => ({
+                      articleCategory: String(entry.articleCategory || "").trim(),
+                      familyCode: String(entry.familyCode || "")
+                        .trim()
+                        .toUpperCase(),
+                      label: String(entry.label || "").trim(),
+                    }))
+                    .filter(
+                      (entry) =>
+                        entry.articleCategory.length > 0 &&
+                        entry.familyCode.length > 0,
+                    );
+                  const invalidFamilyCodeEntry = normalizedFiscalCategoryCatalog.find(
+                    (entry) => !isValidFiscalFamilyCode(entry.familyCode),
+                  );
+                  if (invalidFamilyCodeEntry) {
+                    window.alert(
+                      `Code famille fiscal invalide: "${invalidFamilyCodeEntry.familyCode}". Format attendu: A-Z, 0-9, _, longueur 2-32.`,
+                    );
+                    return;
+                  }
+                  return updateSettings({
                     taxId: genFiscal.taxId.trim() || null,
                     tvaRate: genFiscal.tvaRate,
+                    tvaCatalog: genFiscal.tvaCatalog
+                      .map((entry) => ({
+                        code: String(entry.code || "").trim().toUpperCase(),
+                        label: String(entry.label || "").trim(),
+                        rate: Math.max(0, Number(entry.rate || 0)),
+                      }))
+                      .filter((entry) => entry.code.length > 0),
+                    fiscalCategoryCatalog: normalizedFiscalCategoryCatalog,
                     timbreValue: genFiscal.timbreValue,
                     applyTvaToTicket: genFiscal.applyTvaToTicket,
                     applyTvaToInvoice: genFiscal.applyTvaToInvoice,
                     applyTimbreToTicket: genFiscal.applyTimbreToTicket,
                     applyTimbreToInvoice: genFiscal.applyTimbreToInvoice,
                     printPreviewOnValidate: genFiscal.printPreviewOnValidate,
+                    printAutoOnPreview: genFiscal.printAutoOnPreview,
                   } as any)
-                }
+                }}
                 onReset={() =>
                   setGenFiscal({
                     taxId: settings.taxId ?? "",
                     tvaRate: settings.tvaRate ?? 0,
+                    tvaCatalog: normalizeTvaCatalogFromSettings((settings as any).tvaCatalog, settings.tvaRate ?? 0),
+                    fiscalCategoryCatalog: normalizeFiscalCategoryCatalogFromSettings(
+                      (settings as any).fiscalCategoryCatalog,
+                    ),
                     timbreValue: settings.timbreValue ?? 0,
                     applyTvaToTicket: Boolean(settings.applyTvaToTicket),
                     applyTvaToInvoice: Boolean(settings.applyTvaToInvoice),
@@ -2301,6 +3582,8 @@ const SettingsManager: React.FC = () => {
                     printPreviewOnValidate: Boolean(
                       settings.printPreviewOnValidate,
                     ),
+                    printAutoOnPreview:
+                      (settings as any).printAutoOnPreview !== false,
                   })
                 }
               >
@@ -2335,6 +3618,194 @@ const SettingsManager: React.FC = () => {
                       className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border border-transparent focus:border-indigo-500"
                     />
                   </div>
+                </div>
+                <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      Catalogue TVA (compatible A4 / A5)
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setGenFiscal((p) => ({
+                          ...p,
+                          tvaCatalog: [
+                            ...p.tvaCatalog,
+                            { code: "", label: "", rate: Number(p.tvaRate || 0) },
+                          ],
+                        }))
+                      }
+                      className="px-3 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase"
+                    >
+                      + Ajouter taux
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {genFiscal.tvaCatalog.map((entry, index) => (
+                      <div key={`tva-row-${index}`} className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                        <input
+                          type="text"
+                          value={entry.code}
+                          onChange={(e) =>
+                            setGenFiscal((p) => ({
+                              ...p,
+                              tvaCatalog: p.tvaCatalog.map((row, i) =>
+                                i === index ? { ...row, code: e.target.value.toUpperCase() } : row,
+                              ),
+                            }))
+                          }
+                          className="md:col-span-3 px-4 py-3 bg-white rounded-xl font-bold outline-none border border-transparent focus:border-indigo-500"
+                          placeholder="Code (ex: TVA_STD)"
+                        />
+                        <input
+                          type="text"
+                          value={entry.label}
+                          onChange={(e) =>
+                            setGenFiscal((p) => ({
+                              ...p,
+                              tvaCatalog: p.tvaCatalog.map((row, i) =>
+                                i === index ? { ...row, label: e.target.value } : row,
+                              ),
+                            }))
+                          }
+                          className="md:col-span-5 px-4 py-3 bg-white rounded-xl font-bold outline-none border border-transparent focus:border-indigo-500"
+                          placeholder="Libellé"
+                        />
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={entry.rate}
+                          onChange={(e) =>
+                            setGenFiscal((p) => ({
+                              ...p,
+                              tvaCatalog: p.tvaCatalog.map((row, i) =>
+                                i === index ? { ...row, rate: Math.max(0, Number(e.target.value || 0)) } : row,
+                              ),
+                            }))
+                          }
+                          className="md:col-span-3 px-4 py-3 bg-white rounded-xl font-bold outline-none border border-transparent focus:border-indigo-500"
+                          placeholder="%"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setGenFiscal((p) => ({
+                              ...p,
+                              tvaCatalog:
+                                p.tvaCatalog.length <= 1
+                                  ? p.tvaCatalog
+                                  : p.tvaCatalog.filter((_, i) => i !== index),
+                            }))
+                          }
+                          className="md:col-span-1 px-3 py-2 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-xs font-black"
+                        >
+                          X
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      Catégories fiscales (mapping)
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setGenFiscal((p) => ({
+                          ...p,
+                          fiscalCategoryCatalog: [
+                            ...p.fiscalCategoryCatalog,
+                            { articleCategory: "", familyCode: "", label: "" },
+                          ],
+                        }))
+                      }
+                      className="px-3 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase"
+                    >
+                      + Ajouter ligne
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {genFiscal.fiscalCategoryCatalog.map((entry, index) => (
+                      <div key={`fiscal-cat-${index}`} className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                        <select
+                          value={entry.articleCategory}
+                          onChange={(e) =>
+                            setGenFiscal((p) => ({
+                              ...p,
+                              fiscalCategoryCatalog: p.fiscalCategoryCatalog.map((row, i) =>
+                                i === index
+                                  ? { ...row, articleCategory: e.target.value }
+                                  : row,
+                              ),
+                            }))
+                          }
+                          className="md:col-span-4 px-4 py-3 bg-white rounded-xl font-bold outline-none border border-transparent focus:border-indigo-500"
+                        >
+                          <option value="">Choisir une catégorie article</option>
+                          {articleCategoryOptions.map((categoryName) => (
+                            <option key={categoryName} value={categoryName}>
+                              {categoryName}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="text"
+                          value={entry.familyCode}
+                          onChange={(e) =>
+                            setGenFiscal((p) => ({
+                              ...p,
+                              fiscalCategoryCatalog: p.fiscalCategoryCatalog.map((row, i) =>
+                                i === index
+                                  ? { ...row, familyCode: e.target.value.toUpperCase() }
+                                  : row,
+                              ),
+                            }))
+                          }
+                          className={`md:col-span-3 px-4 py-3 bg-white rounded-xl font-bold outline-none border focus:border-indigo-500 ${
+                            entry.familyCode &&
+                            !isValidFiscalFamilyCode(entry.familyCode)
+                              ? "border-rose-300"
+                              : "border-transparent"
+                          }`}
+                          placeholder="Code famille (ex: FAM_BOISSONS)"
+                        />
+                        <input
+                          type="text"
+                          value={entry.label || ""}
+                          onChange={(e) =>
+                            setGenFiscal((p) => ({
+                              ...p,
+                              fiscalCategoryCatalog: p.fiscalCategoryCatalog.map((row, i) =>
+                                i === index ? { ...row, label: e.target.value } : row,
+                              ),
+                            }))
+                          }
+                          className="md:col-span-4 px-4 py-3 bg-white rounded-xl font-bold outline-none border border-transparent focus:border-indigo-500"
+                          placeholder="Libellé fiscal (optionnel)"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setGenFiscal((p) => ({
+                              ...p,
+                              fiscalCategoryCatalog: p.fiscalCategoryCatalog.filter(
+                                (_, i) => i !== index,
+                              ),
+                            }))
+                          }
+                          className="md:col-span-1 px-3 py-2 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-xs font-black"
+                        >
+                          X
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-bold">
+                    Ce mapping est fiscal uniquement (NACEF) et n’impacte pas la
+                    structure métier des catégories articles.
+                  </p>
                 </div>
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block ml-2">
@@ -2430,6 +3901,21 @@ const SettingsManager: React.FC = () => {
                         setGenFiscal((p) => ({
                           ...p,
                           printPreviewOnValidate: e.target.checked,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="mt-3 flex items-center justify-between bg-white border border-slate-100 rounded-xl px-4 py-3">
+                    <span className="text-[10px] font-black text-slate-600 uppercase">
+                      Impression auto quand l'aperçu est ouvert
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={genFiscal.printAutoOnPreview}
+                      onChange={(e) =>
+                        setGenFiscal((p) => ({
+                          ...p,
+                          printAutoOnPreview: e.target.checked,
                         }))
                       }
                     />
@@ -2681,17 +4167,162 @@ const SettingsManager: React.FC = () => {
               </GeneralSettingsSection>
 
               <GeneralSettingsSection
-                title="Modèle ticket client"
-                description="Style du ticket, zones affichées, export / import JSON et aperçu."
+                title="Pilotage des sources d'impression"
+                description="Un seul endroit pour choisir la source d'impression de chaque flux (client/cuisine/bar)."
                 onSave={() =>
                   updateSettings({
+                    printTemplateSource: {
+                      client: printTemplateSource.client,
+                      kitchen: printTemplateSource.kitchen,
+                      bar: printTemplateSource.bar,
+                    } as any,
+                  } as any)
+                }
+                onReset={() => {
+                  const s = ((settings as any).printTemplateSource || {}) as any;
+                  setPrintTemplateSource({
+                    client:  (String(s?.client  || "").toUpperCase() === "DESIGNER" ? "DESIGNER" : "BUILTIN") as "BUILTIN" | "DESIGNER",
+                    kitchen: (String(s?.kitchen || "").toUpperCase() === "DESIGNER" ? "DESIGNER" : "BUILTIN") as "BUILTIN" | "DESIGNER",
+                    bar:     (String(s?.bar     || "").toUpperCase() === "DESIGNER" ? "DESIGNER" : "BUILTIN") as "BUILTIN" | "DESIGNER",
+                  });
+                }}
+              >
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPrintTemplateSource({
+                          client: "DESIGNER",
+                          kitchen: "DESIGNER",
+                          bar: "DESIGNER",
+                        })
+                      }
+                      className="px-3 py-2 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-100 text-[10px] font-black uppercase tracking-wider hover:bg-indigo-100"
+                    >
+                      Appliquer Designer partout
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPrintTemplateSource({
+                          client: "BUILTIN",
+                          kitchen: "BUILTIN",
+                          bar: "BUILTIN",
+                        })
+                      }
+                      className="px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-black uppercase tracking-wider hover:bg-emerald-100"
+                    >
+                      Appliquer Modèle partout
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {printTemplateKinds.map((kind) => {
+                    const isDesigner = printTemplateSource[kind] === "DESIGNER";
+                    return (
+                      <div
+                        key={kind}
+                        className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2"
+                      >
+                        <p className="text-[10px] font-black uppercase text-slate-700">
+                          {printTemplateKindLabels[kind]}
+                        </p>
+                        <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-full p-0.5 w-max">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPrintTemplateSource((p) => ({
+                                ...p,
+                                [kind]: "BUILTIN",
+                              }))
+                            }
+                            className={`px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all ${
+                              !isDesigner
+                                ? "bg-indigo-600 text-white shadow"
+                                : "text-slate-500 hover:text-slate-700"
+                            }`}
+                          >
+                            Modèle
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPrintTemplateSource((p) => ({
+                                ...p,
+                                [kind]: "DESIGNER",
+                              }))
+                            }
+                            className={`px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all ${
+                              isDesigner
+                                ? "bg-indigo-600 text-white shadow"
+                                : "text-slate-500 hover:text-slate-700"
+                            }`}
+                          >
+                            Designer
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-slate-500 font-bold">
+                          Actif: {isDesigner ? "Designer visuel" : "Modèle ticket"}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-black uppercase text-amber-700">
+                        Diagnostic impression (runtime)
+                      </p>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(
+                              printDiagnosticSnapshot,
+                            );
+                            notifySuccess("Diagnostic copié.");
+                          } catch {
+                            notifyError("Copie impossible.");
+                          }
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg bg-white border border-amber-200 text-amber-700 text-[10px] font-black uppercase"
+                      >
+                        Copier JSON
+                      </button>
+                    </div>
+                    <pre className="text-[10px] leading-relaxed text-slate-700 bg-white border border-amber-100 rounded-lg p-2 overflow-x-auto max-h-52">
+{printDiagnosticSnapshot}
+                    </pre>
+                  </div>
+                </div>
+              </GeneralSettingsSection>
+
+              <GeneralSettingsSection
+                title="Modèle ticket client"
+                description="Style du ticket, zones affichées, export / import JSON et aperçu."
+                headerBadge={
+                  <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                    ((settings as any)?.printTemplateSource?.client === "DESIGNER")
+                      ? "bg-indigo-100 text-indigo-700 border border-indigo-200"
+                      : "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                  }`}>
+                    <span className="w-1.5 h-1.5 rounded-full inline-block bg-current" />
+                    {((settings as any)?.printTemplateSource?.client === "DESIGNER") ? "Designer visuel actif" : "Modèle ticket actif"}
+                  </span>
+                }
+                onSave={() => {
+                  if (isNacefTicketTemplateLocked) return Promise.resolve();
+                  return updateSettings({
                     clientTicketTemplate: genTicket.clientTicketTemplate,
                     clientTicketLayout: {
                       ...(genTicket.clientTicketLayout || {}),
                     } as any,
-                  } as any)
-                }
+                  } as any);
+                }}
                 onReset={() =>
+                  isNacefTicketTemplateLocked
+                    ? undefined
+                    :
                   setGenTicket({
                     clientTicketTemplate: (settings.clientTicketTemplate ||
                       "CLASSIC") as ClientTicketTemplateUi,
@@ -2701,6 +4332,11 @@ const SettingsManager: React.FC = () => {
                   })
                 }
               >
+                {isNacefTicketTemplateLocked ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800">
+                    NACEF activé: le format ticket fiscal est imposé. Les options de personnalisation du ticket client sont verrouillées.
+                  </div>
+                ) : null}
                 <div className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 space-y-2">
                   <span className="text-[10px] font-black text-slate-600 uppercase block">
                     Modèle ticket client
@@ -2714,6 +4350,7 @@ const SettingsManager: React.FC = () => {
                           "CLASSIC") as ClientTicketTemplateUi,
                       }))
                     }
+                    disabled={isNacefTicketTemplateLocked}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-black text-xs"
                   >
                     <option value="CLASSIC">Classic</option>
@@ -2738,6 +4375,7 @@ const SettingsManager: React.FC = () => {
                         },
                       }))
                     }
+                    disabled={isNacefTicketTemplateLocked}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-bold text-xs"
                   />
                   <textarea
@@ -2753,6 +4391,7 @@ const SettingsManager: React.FC = () => {
                       }))
                     }
                     rows={2}
+                    disabled={isNacefTicketTemplateLocked}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-bold text-xs resize-none"
                   />
                   <div className="grid grid-cols-2 gap-2">
@@ -2796,14 +4435,16 @@ const SettingsManager: React.FC = () => {
                               },
                             }))
                           }
+                          disabled={isNacefTicketTemplateLocked}
                         />
                       </label>
                     ))}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2 pt-1">
                     <button
                       type="button"
                       onClick={handleExportTicketTemplate}
+                      disabled={isNacefTicketTemplateLocked}
                       className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-100 text-[10px] font-black uppercase tracking-wider hover:bg-indigo-100"
                     >
                       <Download size={12} />
@@ -2812,6 +4453,7 @@ const SettingsManager: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => ticketTemplateImportRef.current?.click()}
+                      disabled={isNacefTicketTemplateLocked}
                       className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-black uppercase tracking-wider hover:bg-emerald-100"
                     >
                       <Upload size={12} />
@@ -2832,6 +4474,26 @@ const SettingsManager: React.FC = () => {
                     >
                       <Download size={12} />
                       HTML client
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleTemplatePreviewOrDownload("client", "pdf", "download")
+                      }
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-violet-50 text-violet-700 border border-violet-100 text-[10px] font-black uppercase tracking-wider hover:bg-violet-100"
+                    >
+                      <Download size={12} />
+                      PDF client
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleTemplatePreviewOrDownload("client", "pdf", "preview")
+                      }
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-100 text-[10px] font-black uppercase tracking-wider hover:bg-fuchsia-100"
+                    >
+                      <FileText size={12} />
+                      Aperçu client
                     </button>
                     <input
                       ref={ticketTemplateImportRef}
@@ -2967,8 +4629,141 @@ const SettingsManager: React.FC = () => {
               </GeneralSettingsSection>
 
               <GeneralSettingsSection
+                title="Designer gratuit v1 (HTML)"
+                description="Crée tes designs client/cuisine/bar sans licence. Les placeholders {{...}} sont remplacés à l’impression."
+                headerBadge={
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {(["client", "kitchen", "bar"] as const).map((kind) => {
+                      const labels: Record<string, string> = { client: "Client", kitchen: "Cuisine", bar: "Bar" };
+                      const isDesigner = ((settings as any)?.printTemplateSource?.[kind]) === "DESIGNER";
+                      return (
+                        <span key={kind} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${isDesigner ? "bg-indigo-100 text-indigo-700 border border-indigo-200" : "bg-slate-100 text-slate-500 border border-slate-200"}`}>
+                          <span className="w-1.5 h-1.5 rounded-full inline-block bg-current" />
+                          {labels[kind]}: {isDesigner ? "Designer" : "Modèle"}
+                        </span>
+                      );
+                    })}
+                  </div>
+                }
+                onSave={() =>
+                  updateSettings({
+                    designerPrintTemplates: {
+                      clientHtml: String(designerTemplates.clientHtml || ""),
+                      kitchenHtml: String(designerTemplates.kitchenHtml || ""),
+                      barHtml: String(designerTemplates.barHtml || ""),
+                    },
+                  } as any)
+                }
+                onReset={() => {
+                  const d = ((settings as any).designerPrintTemplates || {}) as any;
+                  setDesignerTemplates({
+                    clientHtml: String(d?.clientHtml || ""),
+                    kitchenHtml: String(d?.kitchenHtml || ""),
+                    barHtml: String(d?.barHtml || ""),
+                  });
+                  const s = ((settings as any).printTemplateSource || {}) as any;
+                  setPrintTemplateSource({
+                    client:  (String(s?.client  || "").toUpperCase() === "DESIGNER" ? "DESIGNER" : "BUILTIN") as "BUILTIN" | "DESIGNER",
+                    kitchen: (String(s?.kitchen || "").toUpperCase() === "DESIGNER" ? "DESIGNER" : "BUILTIN") as "BUILTIN" | "DESIGNER",
+                    bar:     (String(s?.bar     || "").toUpperCase() === "DESIGNER" ? "DESIGNER" : "BUILTIN") as "BUILTIN" | "DESIGNER",
+                  });
+                }}
+              >
+                <div className="space-y-4">
+                  <p className="text-[10px] font-black text-slate-600 uppercase">
+                    Placeholders utiles: {"{{restaurantName}}"} {"{{ticketCode}}"} {"{{itemsLines}}"} {"{{total}}"} {"{{currency}}"}
+                  </p>
+                  <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[10px] font-black uppercase text-slate-600">
+                          Client HTML
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setDesignerModalKind("client")}
+                          className="px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 text-[10px] font-black uppercase"
+                        >
+                          Designer
+                        </button>
+                      </div>
+                      <textarea
+                        value={designerTemplates.clientHtml}
+                        onChange={(e) =>
+                          setDesignerTemplates((p) => ({ ...p, clientHtml: e.target.value }))
+                        }
+                        rows={12}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-mono"
+                        placeholder="<html>...{{ticketCode}}...</html>"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[10px] font-black uppercase text-slate-600">
+                          Cuisine HTML
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setDesignerModalKind("kitchen")}
+                          className="px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 text-[10px] font-black uppercase"
+                        >
+                          Designer
+                        </button>
+                      </div>
+                      <textarea
+                        value={designerTemplates.kitchenHtml}
+                        onChange={(e) =>
+                          setDesignerTemplates((p) => ({ ...p, kitchenHtml: e.target.value }))
+                        }
+                        rows={12}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-mono"
+                        placeholder="<html>...{{title}}...</html>"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[10px] font-black uppercase text-slate-600">
+                          Bar HTML
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setDesignerModalKind("bar")}
+                          className="px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 text-[10px] font-black uppercase"
+                        >
+                          Designer
+                        </button>
+                      </div>
+                      <textarea
+                        value={designerTemplates.barHtml}
+                        onChange={(e) =>
+                          setDesignerTemplates((p) => ({ ...p, barHtml: e.target.value }))
+                        }
+                        rows={12}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-mono"
+                        placeholder="<html>...{{title}}...</html>"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </GeneralSettingsSection>
+
+              <GeneralSettingsSection
                 title="Impression production (cuisine / bar)"
-                description="Bons cuisine et bar : en-têtes, options d’affichage et tests d’impression. Son de demande d’addition."
+                description="Workflow unifié : choisis la cible (Cuisine/Bar), règle le modèle, puis teste l’impression."
+                headerBadge={
+                  <div className="flex items-center gap-2">
+                    {(["kitchen", "bar"] as const).map((kind) => {
+                      const labels: Record<string, string> = { kitchen: "Cuisine", bar: "Bar" };
+                      const isDesigner = ((settings as any)?.printTemplateSource?.[kind]) === "DESIGNER";
+                      return (
+                        <span key={kind} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${isDesigner ? "bg-indigo-100 text-indigo-700 border border-indigo-200" : "bg-emerald-100 text-emerald-700 border border-emerald-200"}`}>
+                          <span className="w-1.5 h-1.5 rounded-full inline-block bg-current" />
+                          {labels[kind]}: {isDesigner ? "Designer" : "Modèle"}
+                        </span>
+                      );
+                    })}
+                  </div>
+                }
                 onSave={() =>
                   updateSettings({
                     kitchenBarPrintTemplates: JSON.parse(
@@ -2990,7 +4785,7 @@ const SettingsManager: React.FC = () => {
                   <p className="text-[10px] font-black text-slate-600 uppercase">
                     Modèle impression production (Cuisine / Bar)
                   </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-2">
                     <button
                       type="button"
                       onClick={handleDownloadExternalKitchenTemplateSample}
@@ -3009,6 +4804,26 @@ const SettingsManager: React.FC = () => {
                     </button>
                     <button
                       type="button"
+                      onClick={() =>
+                        handleTemplatePreviewOrDownload("kitchen", "pdf", "download")
+                      }
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-violet-50 text-violet-700 border border-violet-100 text-[10px] font-black uppercase tracking-wider hover:bg-violet-100"
+                    >
+                      <Download size={12} />
+                      PDF Cuisine
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleTemplatePreviewOrDownload("kitchen", "pdf", "preview")
+                      }
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-100 text-[10px] font-black uppercase tracking-wider hover:bg-fuchsia-100"
+                    >
+                      <FileText size={12} />
+                      Aperçu Cuisine
+                    </button>
+                    <button
+                      type="button"
                       onClick={handleDownloadExternalBarTemplateSample}
                       className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-cyan-50 text-cyan-700 border border-cyan-100 text-[10px] font-black uppercase tracking-wider hover:bg-cyan-100"
                     >
@@ -3023,88 +4838,95 @@ const SettingsManager: React.FC = () => {
                       <Download size={12} />
                       HTML Bar
                     </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleTemplatePreviewOrDownload("bar", "pdf", "download")
+                      }
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-violet-50 text-violet-700 border border-violet-100 text-[10px] font-black uppercase tracking-wider hover:bg-violet-100"
+                    >
+                      <Download size={12} />
+                      PDF Bar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleTemplatePreviewOrDownload("bar", "pdf", "preview")
+                      }
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-100 text-[10px] font-black uppercase tracking-wider hover:bg-fuchsia-100"
+                    >
+                      <FileText size={12} />
+                      Aperçu Bar
+                    </button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="rounded-xl border border-slate-200 p-3 space-y-2">
-                      <p className="text-[10px] font-black text-slate-700 uppercase">
-                        Cuisine
-                      </p>
+                    <div className="rounded-xl border border-slate-200 p-3 space-y-3 md:col-span-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-1 bg-slate-100 rounded-full p-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setProductionEditorKind("kitchen")}
+                            className={`px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all ${
+                              productionEditorKind === "kitchen"
+                                ? "bg-indigo-600 text-white shadow"
+                                : "text-slate-500 hover:text-slate-700"
+                            }`}
+                          >
+                            Cuisine
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setProductionEditorKind("bar")}
+                            className={`px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all ${
+                              productionEditorKind === "bar"
+                                ? "bg-indigo-600 text-white shadow"
+                                : "text-slate-500 hover:text-slate-700"
+                            }`}
+                          >
+                            Bar
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            duplicateProductionTemplate(
+                              productionEditorKind,
+                              productionEditorKind === "kitchen"
+                                ? "bar"
+                                : "kitchen",
+                            )
+                          }
+                          className="px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase"
+                        >
+                          Copier vers{" "}
+                          {productionEditorKind === "kitchen"
+                            ? "Bar"
+                            : "Cuisine"}
+                        </button>
+                      </div>
                       <input
                         type="text"
-                        value={kitchenTpl.title}
+                        value={activeProductionTpl.title}
                         onChange={(e) =>
-                          setGenKitchen((g) => ({
-                            ...g,
-                            kitchenBarPrintTemplates: {
-                              ...(g.kitchenBarPrintTemplates as object),
-                              kitchen: {
-                                ...((g.kitchenBarPrintTemplates as any)?.kitchen ||
-                                  {}),
-                                title: e.target.value,
-                              },
-                            },
-                          }))
+                          updateProductionTemplate(productionEditorKind, {
+                            title: e.target.value,
+                          })
                         }
-                        placeholder="Titre bon cuisine"
+                        placeholder={
+                          productionEditorKind === "kitchen"
+                            ? "Titre bon cuisine"
+                            : "Titre bon bar"
+                        }
                         className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold"
                       />
                       <textarea
-                        value={kitchenTpl.footerText}
+                        value={activeProductionTpl.footerText}
                         onChange={(e) =>
-                          setGenKitchen((g) => ({
-                            ...g,
-                            kitchenBarPrintTemplates: {
-                              ...(g.kitchenBarPrintTemplates as object),
-                              kitchen: {
-                                ...((g.kitchenBarPrintTemplates as any)?.kitchen ||
-                                  {}),
-                                footerText: e.target.value,
-                              },
-                            },
-                          }))
+                          updateProductionTemplate(productionEditorKind, {
+                            footerText: e.target.value,
+                          })
                         }
-                        placeholder="Pied bon cuisine (optionnel)"
-                        rows={2}
-                        className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold resize-none"
-                      />
-                    </div>
-                    <div className="rounded-xl border border-slate-200 p-3 space-y-2">
-                      <p className="text-[10px] font-black text-slate-700 uppercase">
-                        Bar / Barman
-                      </p>
-                      <input
-                        type="text"
-                        value={barTpl.title}
-                        onChange={(e) =>
-                          setGenKitchen((g) => ({
-                            ...g,
-                            kitchenBarPrintTemplates: {
-                              ...(g.kitchenBarPrintTemplates as object),
-                              bar: {
-                                ...((g.kitchenBarPrintTemplates as any)?.bar || {}),
-                                title: e.target.value,
-                              },
-                            },
-                          }))
-                        }
-                        placeholder="Titre bon bar"
-                        className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold"
-                      />
-                      <textarea
-                        value={barTpl.footerText}
-                        onChange={(e) =>
-                          setGenKitchen((g) => ({
-                            ...g,
-                            kitchenBarPrintTemplates: {
-                              ...(g.kitchenBarPrintTemplates as object),
-                              bar: {
-                                ...((g.kitchenBarPrintTemplates as any)?.bar || {}),
-                                footerText: e.target.value,
-                              },
-                            },
-                          }))
-                        }
-                        placeholder="Pied bon bar (optionnel)"
+                        placeholder="Pied bon (optionnel)"
                         rows={2}
                         className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold resize-none"
                       />
@@ -3124,42 +4946,19 @@ const SettingsManager: React.FC = () => {
                         className="rounded-xl border border-slate-200 p-2 text-[10px] font-black uppercase text-slate-600"
                       >
                         <div className="flex items-center justify-between bg-slate-50 rounded-lg px-2 py-1.5">
-                          <span>Cuisine: {label}</span>
+                          <span>
+                            {productionEditorKind === "kitchen"
+                              ? "Cuisine"
+                              : "Bar"}
+                            : {label}
+                          </span>
                           <input
                             type="checkbox"
-                            checked={Boolean((kitchenTpl as any)[key])}
+                            checked={Boolean((activeProductionTpl as any)[key])}
                             onChange={(e) =>
-                              setGenKitchen((g) => ({
-                                ...g,
-                                kitchenBarPrintTemplates: {
-                                  ...(g.kitchenBarPrintTemplates as object),
-                                  kitchen: {
-                                    ...((g.kitchenBarPrintTemplates as any)
-                                      ?.kitchen || {}),
-                                    [key]: e.target.checked,
-                                  },
-                                },
-                              }))
-                            }
-                          />
-                        </div>
-                        <div className="flex items-center justify-between bg-slate-50 rounded-lg px-2 py-1.5 mt-1.5">
-                          <span>Bar: {label}</span>
-                          <input
-                            type="checkbox"
-                            checked={Boolean((barTpl as any)[key])}
-                            onChange={(e) =>
-                              setGenKitchen((g) => ({
-                                ...g,
-                                kitchenBarPrintTemplates: {
-                                  ...(g.kitchenBarPrintTemplates as object),
-                                  bar: {
-                                    ...((g.kitchenBarPrintTemplates as any)?.bar ||
-                                      {}),
-                                    [key]: e.target.checked,
-                                  },
-                                },
-                              }))
+                              updateProductionTemplate(productionEditorKind, {
+                                [key]: e.target.checked,
+                              })
                             }
                           />
                         </div>
@@ -3347,6 +5146,67 @@ const SettingsManager: React.FC = () => {
                   >
                     Rafraîchir
                   </button>
+                  <button
+                    type="button"
+                    disabled={adminIntegrityReportBusy || !currentUser}
+                    onClick={() => {
+                      if (!currentUser) return;
+                      setAdminIntegrityReportBusy(true);
+                      void (async () => {
+                        try {
+                          const r = await fetch(
+                            `${SETTINGS_LOG_API_BASE}/pos/admin/logs/integrity-report?userId=${encodeURIComponent(currentUser.id)}&kind=app-admin`,
+                          );
+                          const j = (await r.json().catch(() => ({}))) as {
+                            error?: string;
+                            ok?: boolean;
+                            kind?: string;
+                            totalDays?: number;
+                            totalEntries?: number;
+                            signedEntries?: number;
+                            missingProofEntries?: number;
+                            brokenEntries?: number;
+                            days?: Array<{
+                              dateKey?: string;
+                              ok?: boolean;
+                              totalEntries?: number;
+                              signedEntries?: number;
+                              missingProofEntries?: number;
+                              brokenEntries?: number;
+                            }>;
+                          };
+                          if (!r.ok) throw new Error(j.error || "Erreur vérification intégrité");
+                          setAdminIntegrityReport({
+                            ok: Boolean(j.ok),
+                            kind: String(j.kind || "app-admin"),
+                            totalDays: Number(j.totalDays || 0),
+                            totalEntries: Number(j.totalEntries || 0),
+                            signedEntries: Number(j.signedEntries || 0),
+                            missingProofEntries: Number(j.missingProofEntries || 0),
+                            brokenEntries: Number(j.brokenEntries || 0),
+                            days: Array.isArray(j.days)
+                              ? j.days.map((d) => ({
+                                  dateKey: String(d.dateKey || ""),
+                                  ok: Boolean(d.ok),
+                                  totalEntries: Number(d.totalEntries || 0),
+                                  signedEntries: Number(d.signedEntries || 0),
+                                  missingProofEntries: Number(d.missingProofEntries || 0),
+                                  brokenEntries: Number(d.brokenEntries || 0),
+                                }))
+                              : [],
+                          });
+                          notifySuccess("Rapport d'intégrité généré.");
+                        } catch (e: unknown) {
+                          notifyError(e instanceof Error ? e.message : "Vérification impossible.");
+                        } finally {
+                          setAdminIntegrityReportBusy(false);
+                        }
+                      })();
+                    }}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                  >
+                    Vérifier intégrité complète
+                  </button>
                 </div>
                 <div className="flex flex-wrap gap-3 items-center">
                   <label className="text-[10px] font-black uppercase text-slate-500">
@@ -3395,6 +5255,47 @@ const SettingsManager: React.FC = () => {
                   <span className="px-3 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200">Confirmations: {adminLogStats.confirm}</span>
                   <span className="px-3 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Annulations: {adminLogStats.cancel}</span>
                 </div>
+                {adminLogIntegrity ? (
+                  <div
+                    className={`rounded-xl border px-4 py-3 text-xs font-bold ${
+                      adminLogIntegrity.ok
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : "border-rose-200 bg-rose-50 text-rose-800"
+                    }`}
+                  >
+                    <div>
+                      Intégrité du journal:{" "}
+                      {adminLogIntegrity.ok ? "OK (chaîne intacte)" : "ALERTE (chaîne altérée/incomplète)"}
+                    </div>
+                    <div className="mt-1 text-[11px]">
+                      entrées: {adminLogIntegrity.totalEntries} | signées:{" "}
+                      {adminLogIntegrity.signedEntries} | sans preuve:{" "}
+                      {adminLogIntegrity.missingProofEntries} | cassées:{" "}
+                      {adminLogIntegrity.brokenEntries}
+                    </div>
+                  </div>
+                ) : null}
+                {adminIntegrityReport ? (
+                  <div
+                    className={`rounded-xl border px-4 py-3 text-xs font-bold ${
+                      adminIntegrityReport.ok
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : "border-rose-200 bg-rose-50 text-rose-800"
+                    }`}
+                  >
+                    <div>
+                      Rapport global ({adminIntegrityReport.kind}):{" "}
+                      {adminIntegrityReport.ok ? "OK" : "ALERTE"}
+                    </div>
+                    <div className="mt-1 text-[11px]">
+                      jours: {adminIntegrityReport.totalDays} | entrées:{" "}
+                      {adminIntegrityReport.totalEntries} | signées:{" "}
+                      {adminIntegrityReport.signedEntries} | sans preuve:{" "}
+                      {adminIntegrityReport.missingProofEntries} | cassées:{" "}
+                      {adminIntegrityReport.brokenEntries}
+                    </div>
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap gap-2">
                   {adminLogViewTab === "simple" ? (
                     <>
@@ -3419,6 +5320,32 @@ const SettingsManager: React.FC = () => {
                       >
                         Export ZIP complet
                       </button>
+                      <button
+                        type="button"
+                        disabled={!adminLogDate || !currentUser}
+                        onClick={() => {
+                          if (!currentUser || !adminLogDate) return;
+                          void (async () => {
+                            try {
+                              const r = await fetch(
+                                `${SETTINGS_LOG_API_BASE}/pos/admin/logs/day-proof?userId=${encodeURIComponent(currentUser.id)}&kind=app-admin&date=${encodeURIComponent(adminLogDate)}`,
+                              );
+                              const j = await r.json().catch(() => ({}));
+                              if (!r.ok) throw new Error(String((j as any)?.error || "Export preuve impossible"));
+                              const blob = new Blob([JSON.stringify(j, null, 2)], {
+                                type: "application/json;charset=utf-8;",
+                              });
+                              downloadBlob(blob, `preuve-audit-signee-${adminLogDate}.json`);
+                              notifySuccess("Preuve audit signée exportée.");
+                            } catch (e: unknown) {
+                              notifyError(e instanceof Error ? e.message : "Export preuve impossible.");
+                            }
+                          })();
+                        }}
+                        className="px-4 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                      >
+                        Export preuve audit signée
+                      </button>
                     </>
                   ) : (
                     <>
@@ -3435,6 +5362,32 @@ const SettingsManager: React.FC = () => {
                         className="px-4 py-2 rounded-xl bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest"
                       >
                         Export ZIP complet
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!adminLogDate || !currentUser}
+                        onClick={() => {
+                          if (!currentUser || !adminLogDate) return;
+                          void (async () => {
+                            try {
+                              const r = await fetch(
+                                `${SETTINGS_LOG_API_BASE}/pos/admin/logs/day-proof?userId=${encodeURIComponent(currentUser.id)}&kind=app-admin&date=${encodeURIComponent(adminLogDate)}`,
+                              );
+                              const j = await r.json().catch(() => ({}));
+                              if (!r.ok) throw new Error(String((j as any)?.error || "Export preuve impossible"));
+                              const blob = new Blob([JSON.stringify(j, null, 2)], {
+                                type: "application/json;charset=utf-8;",
+                              });
+                              downloadBlob(blob, `preuve-audit-signee-${adminLogDate}.json`);
+                              notifySuccess("Preuve audit signée exportée.");
+                            } catch (e: unknown) {
+                              notifyError(e instanceof Error ? e.message : "Export preuve impossible.");
+                            }
+                          })();
+                        }}
+                        className="px-4 py-2 rounded-xl bg-indigo-700 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                      >
+                        Export preuve audit signée
                       </button>
                     </>
                   )}
@@ -3538,6 +5491,13 @@ const SettingsManager: React.FC = () => {
                           );
                           const j2 = (await r2.json().catch(() => ({}))) as {
                             content?: string;
+                            integrity?: {
+                              ok?: boolean;
+                              totalEntries?: number;
+                              signedEntries?: number;
+                              missingProofEntries?: number;
+                              brokenEntries?: number;
+                            };
                           };
                           if (r2.ok)
                             setAdminLogContent(
@@ -3545,6 +5505,19 @@ const SettingsManager: React.FC = () => {
                                 ? j2.content
                                 : "",
                             );
+                          if (r2.ok) {
+                            setAdminLogIntegrity(
+                              j2.integrity
+                                ? {
+                                    ok: Boolean(j2.integrity.ok),
+                                    totalEntries: Number(j2.integrity.totalEntries || 0),
+                                    signedEntries: Number(j2.integrity.signedEntries || 0),
+                                    missingProofEntries: Number(j2.integrity.missingProofEntries || 0),
+                                    brokenEntries: Number(j2.integrity.brokenEntries || 0),
+                                  }
+                                : null,
+                            );
+                          }
                         } catch (e: unknown) {
                           notifyError(
                             e instanceof Error ? e.message : "Échec.",
@@ -4220,8 +6193,770 @@ const SettingsManager: React.FC = () => {
           </div>
         )}
 
+        {activeTab === "nacef" && (
+          <div className="bg-white p-8 rounded-[2rem] border border-slate-100 space-y-6">
+            <h3 className="text-xl font-black text-slate-800">
+              Intégration NACEF (Sprint 1)
+            </h3>
+            <p className="text-xs font-bold text-slate-500">
+              Panneau de pilotage S-MDF pour tester le cycle: manifest, certificat,
+              synchronisation et signature ticket.
+            </p>
+            <div className="rounded-2xl border border-indigo-200 bg-indigo-50/60 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-indigo-800">
+                  <HelpCircle size={14} />
+                  <span className="text-xs font-black">Aide guidée NACEF</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowNacefGuide((v) => !v)}
+                  className="px-3 py-1.5 rounded-lg border border-indigo-200 bg-white text-[11px] font-black text-indigo-700"
+                >
+                  {showNacefGuide ? "Masquer" : "Afficher"}
+                </button>
+              </div>
+              {showNacefGuide && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+                    {nacefGuideSteps.map((step, index) => (
+                      (() => {
+                        const priorStepsDone =
+                          index === 0 ||
+                          nacefGuideStepCompleted
+                            .slice(0, index)
+                            .every((isDone) => Boolean(isDone));
+                        const isLocked = !priorStepsDone;
+                        const isDone = Boolean(nacefGuideStepCompleted[index]);
+                        const statusLabel = isLocked
+                          ? "🔒 verrouillé"
+                          : isDone
+                            ? "✅ validé"
+                            : "⛔ à faire";
+                        return (
+                      <button
+                        key={step.title}
+                        type="button"
+                        onClick={() => setNacefGuideStep(index)}
+                        disabled={isLocked}
+                        className={`text-left rounded-xl border px-3 py-2 transition ${
+                          nacefGuideStep === index
+                            ? "border-amber-300 bg-amber-50"
+                            : "border-indigo-100 bg-white hover:bg-indigo-50"
+                        } disabled:opacity-45 disabled:cursor-not-allowed`}
+                      >
+                        <p className="text-[10px] font-black text-slate-700">{step.title}</p>
+                        <p className="text-[10px] font-semibold text-slate-500 mt-1">
+                          {statusLabel}
+                        </p>
+                      </button>
+                        );
+                      })()
+                    ))}
+                  </div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                    <p className="text-[11px] font-black text-amber-800">
+                      Étape {nacefGuideStep + 1}/{nacefGuideSteps.length}
+                    </p>
+                    <p className="text-[11px] font-semibold text-amber-700 mt-1">
+                      {nacefCurrentGuide.hint}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNacefGuideStep((s) => Math.max(0, s - 1))}
+                      disabled={nacefGuideStep <= 0}
+                      className="px-3 py-1.5 rounded-lg border border-indigo-200 bg-white text-[11px] font-black text-indigo-700 disabled:opacity-40"
+                    >
+                      Précédent
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        runNacefAction(
+                          nacefCurrentGuide.run,
+                          nacefCurrentGuide.successMessage,
+                        )
+                      }
+                      disabled={nacefBusy}
+                      className="px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-600 text-[11px] font-black text-white disabled:opacity-50"
+                    >
+                      {nacefCurrentGuide.actionLabel}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setNacefGuideStep((s) => Math.min(nacefGuideSteps.length - 1, s + 1))
+                      }
+                      disabled={
+                        nacefGuideStep >= nacefGuideSteps.length - 1 ||
+                        !nacefGuideCurrentStepDone
+                      }
+                      className="px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-[11px] font-black text-indigo-700 disabled:opacity-40"
+                    >
+                      Suivant
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <label className="inline-flex items-center gap-2 text-xs font-black text-slate-700">
+              <input
+                type="checkbox"
+                checked={Boolean((settings as any)?.nacefEnabled)}
+                onChange={(e) =>
+                  void updateSettings({ nacefEnabled: e.target.checked } as any)
+                }
+              />
+              Activer la fiscalisation NACEF pour les nouveaux tickets (Sprint 2)
+            </label>
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">
+                Politique de blocage
+              </label>
+              <select
+                value={String((settings as any)?.nacefEnforcementMode || "SOFT")}
+                onChange={(e) =>
+                  void updateSettings({
+                    nacefEnforcementMode:
+                      String(e.target.value).toUpperCase() === "HARD"
+                        ? "HARD"
+                        : "SOFT",
+                  } as any)
+                }
+                className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold"
+              >
+                <option value="SOFT">SOFT (ne bloque pas la vente)</option>
+                <option value="HARD">HARD (bloque en cas d'échec NACEF)</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <div>
+                <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">
+                  Mode backend NACEF
+                </label>
+                <select
+                  value={nacefRuntimeMode}
+                  onChange={(e) =>
+                    setNacefRuntimeMode(
+                      String(e.target.value).toUpperCase() === "REMOTE"
+                        ? "REMOTE"
+                        : "SIMULATED",
+                    )
+                  }
+                  className="mt-1 w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-bold"
+                >
+                  <option value="SIMULATED">SIMULATED</option>
+                  <option value="REMOTE">REMOTE</option>
+                </select>
+              </div>
+              <div className="lg:col-span-2">
+                <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">
+                  Base URL S-MDF (mode REMOTE)
+                </label>
+                <input
+                  type="text"
+                  value={nacefRuntimeBaseUrl}
+                  onChange={(e) => setNacefRuntimeBaseUrl(e.target.value)}
+                  placeholder="http://127.0.0.1:10006"
+                  className="mt-1 w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-bold"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <div className="lg:col-span-2">
+                <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">
+                  IMDF
+                </label>
+                <input
+                  type="text"
+                  value={nacefImdf}
+                  onChange={(e) => setNacefImdf(e.target.value.toUpperCase())}
+                  placeholder="IMDF-001"
+                  className="mt-1 w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-bold"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">
+                  Mode
+                </label>
+                <select
+                  value={nacefMode}
+                  onChange={(e) =>
+                    setNacefMode(
+                      String(e.target.value).toUpperCase() === "OFFLINE"
+                        ? "OFFLINE"
+                        : "ONLINE",
+                    )
+                  }
+                  className="mt-1 w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm font-bold"
+                >
+                  <option value="ONLINE">ONLINE</option>
+                  <option value="OFFLINE">OFFLINE</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={nacefBusy}
+                onClick={() =>
+                  runNacefAction(async () => {
+                    await updateSettings({
+                      nacefImdf: String(nacefImdf || "").trim(),
+                      nacefMode: nacefRuntimeMode,
+                      nacefBaseUrl: String(nacefRuntimeBaseUrl || "").trim(),
+                    } as any);
+                    await refreshNacefManifest();
+                  }, "Configuration NACEF enregistrée.")
+                }
+                className="px-4 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+              >
+                Enregistrer config NACEF
+              </button>
+              <button
+                type="button"
+                disabled={nacefBusy || !nacefGuideStepCompleted[0]}
+                onClick={() =>
+                  runNacefAction(() => refreshNacefManifest(), "Manifest récupéré.")
+                }
+                className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+              >
+                Rafraîchir état
+              </button>
+              <button
+                type="button"
+                disabled={
+                  nacefBusy ||
+                  !nacefGuideStepCompleted[1] ||
+                  (nacefManifestLoaded && !nacefCanSign)
+                }
+                onClick={() =>
+                  runNacefAction(
+                    async () => {
+                      const imdf = String(nacefImdf || "").trim().toUpperCase();
+                      await callNacef(`/pos/nacef/certificate/request`, {
+                        method: "POST",
+                        body: JSON.stringify({ imdf }),
+                      });
+                      await refreshNacefManifest();
+                    },
+                    "Demande certificat envoyée.",
+                  )
+                }
+                className="px-4 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+              >
+                Demander certificat
+              </button>
+              <button
+                type="button"
+                disabled={nacefBusy || !nacefGuideStepCompleted[2]}
+                onClick={() =>
+                  runNacefAction(
+                    async () => {
+                      const imdf = String(nacefImdf || "").trim().toUpperCase();
+                      await callNacef(`/pos/nacef/certificate/simulate-generated`, {
+                        method: "POST",
+                        body: JSON.stringify({ imdf, expiresInDays: 365 }),
+                      });
+                      await refreshNacefManifest();
+                    },
+                    "Certificat simulé généré.",
+                  )
+                }
+                className="px-4 py-2 rounded-xl border border-indigo-200 bg-white text-indigo-700 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+              >
+                Simuler certificat OK
+              </button>
+              <button
+                type="button"
+                disabled={nacefBusy || !nacefGuideStepCompleted[3]}
+                onClick={() =>
+                  runNacefAction(
+                    async () => {
+                      const imdf = String(nacefImdf || "").trim().toUpperCase();
+                      await callNacef(`/pos/nacef/certificate/simulate-expired`, {
+                        method: "POST",
+                        body: JSON.stringify({ imdf }),
+                      });
+                      await refreshNacefManifest();
+                    },
+                    "Certificat simulé expiré.",
+                  )
+                }
+                className="px-4 py-2 rounded-xl border border-amber-200 bg-white text-amber-700 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+              >
+                Simuler certificat expiré
+              </button>
+              <button
+                type="button"
+                disabled={nacefBusy}
+                onClick={() =>
+                  runNacefAction(
+                    async () => {
+                      const imdf = String(nacefImdf || "").trim().toUpperCase();
+                      await callNacef(`/pos/nacef/status`, {
+                        method: "POST",
+                        body: JSON.stringify({ imdf, status: "SUSPENDED" }),
+                      });
+                      await refreshNacefManifest();
+                    },
+                    "S-MDF suspendu (simulation).",
+                  )
+                }
+                className="px-4 py-2 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+              >
+                Simuler suspension
+              </button>
+              <button
+                type="button"
+                disabled={nacefBusy}
+                onClick={() =>
+                  runNacefAction(
+                    async () => {
+                      const imdf = String(nacefImdf || "").trim().toUpperCase();
+                      await callNacef(`/pos/nacef/status`, {
+                        method: "POST",
+                        body: JSON.stringify({ imdf, status: "REVOKED" }),
+                      });
+                      await refreshNacefManifest();
+                    },
+                    "Certificat révoqué (simulation).",
+                  )
+                }
+                className="px-4 py-2 rounded-xl border border-rose-200 bg-white text-rose-700 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+              >
+                Simuler révocation
+              </button>
+              <button
+                type="button"
+                disabled={nacefBusy}
+                onClick={() =>
+                  runNacefAction(
+                    async () => {
+                      const imdf = String(nacefImdf || "").trim().toUpperCase();
+                      await callNacef(`/pos/nacef/status`, {
+                        method: "POST",
+                        body: JSON.stringify({ imdf, status: "ACTIVE" }),
+                      });
+                      await refreshNacefManifest();
+                    },
+                    "Réactivation demandée.",
+                  )
+                }
+                className="px-4 py-2 rounded-xl border border-slate-200 bg-slate-100 text-slate-700 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+              >
+                Réactiver S-MDF
+              </button>
+              <button
+                type="button"
+                disabled={nacefBusy}
+                onClick={() =>
+                  runNacefAction(
+                    async () => {
+                      const imdf = String(nacefImdf || "").trim().toUpperCase();
+                      await callNacef(`/pos/nacef/sync`, {
+                        method: "POST",
+                        body: JSON.stringify({ imdf, mode: nacefMode }),
+                      });
+                      await refreshNacefManifest();
+                    },
+                    "Synchronisation NACEF réussie.",
+                  )
+                }
+                className="px-4 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+              >
+                Synchroniser
+              </button>
+              <button
+                type="button"
+                disabled={nacefBusy}
+                onClick={() =>
+                  runNacefAction(
+                    async () => {
+                      const imdf = String(nacefImdf || "").trim().toUpperCase();
+                      await callNacef(`/pos/nacef/sign`, {
+                        method: "POST",
+                        body: JSON.stringify({
+                          imdf,
+                          ticket: {
+                            id: `TEST-${Date.now()}`,
+                            operationType: "SALE",
+                            transactionType: "NORMAL",
+                            totalHt: "10.000",
+                            taxTotal: "0.700",
+                          },
+                        }),
+                      });
+                      setNacefGuideSignDone(true);
+                      await refreshNacefManifest();
+                    },
+                    "Ticket test signé.",
+                  )
+                }
+                className="px-4 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+              >
+                Signer ticket test
+              </button>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-2">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-black text-slate-700">Statut S-MDF:</span>
+                <span className="px-2 py-1 rounded-lg bg-white border border-slate-200 font-black text-slate-800">
+                  {String(nacefManifest?.status || "—")}
+                </span>
+                <span className="font-black text-slate-700">Mode:</span>
+                <span className="px-2 py-1 rounded-lg bg-white border border-slate-200 font-black text-slate-800">
+                  {String(nacefManifest?.state || "—")}
+                </span>
+                <span className="font-black text-slate-700">Certificat:</span>
+                <span className="px-2 py-1 rounded-lg bg-white border border-slate-200 font-black text-slate-800">
+                  {String(nacefManifest?.certificateInfo?.certRequestStatus || "—")}
+                </span>
+                <span className="font-black text-slate-700">Offline dispo:</span>
+                <span className="px-2 py-1 rounded-lg bg-white border border-slate-200 font-black text-slate-800">
+                  {String(nacefManifest?.availableOfflineTickets ?? "—")}
+                </span>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="font-black text-slate-700">Blocage transaction:</span>
+                  <span
+                    className={`px-2 py-1 rounded-lg font-black border ${
+                      nacefCanSign
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        : "bg-rose-50 text-rose-700 border-rose-200"
+                    }`}
+                  >
+                    {nacefCanSign ? "AUCUN (vente autorisée)" : "ACTIF (vente bloquée)"}
+                  </span>
+                  {!nacefCanSign && nacefBlockingCode && (
+                    <span className="px-2 py-1 rounded-lg bg-rose-100 text-rose-800 border border-rose-200 font-black">
+                      {nacefBlockingCode}
+                    </span>
+                  )}
+                </div>
+                {!nacefCanSign && (
+                  <div className="text-[11px] text-slate-700 font-bold space-y-1">
+                    <div>
+                      <span className="text-slate-500">Cause:</span>{" "}
+                      {nacefBlockingMessage || "Blocage fiscal NACEF détecté."}
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Action recommandée:</span>{" "}
+                      {nacefRecommendation}
+                    </div>
+                    {nacefQuickAction && (
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          disabled={nacefBusy}
+                          onClick={() =>
+                            runNacefAction(
+                              runNacefQuickAction,
+                              `${nacefQuickAction.label} exécutée.`,
+                            )
+                          }
+                          className="px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                        >
+                          {nacefQuickAction.label}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <pre className="text-[11px] text-slate-700 bg-white border border-slate-200 rounded-xl p-3 overflow-auto max-h-72">
+                {JSON.stringify(nacefManifest || {}, null, 2)}
+              </pre>
+            </div>
+          </div>
+        )}
+
         {activeTab === "hardware" && (
           <div className="grid grid-cols-1 gap-8">
+            <div className="bg-white p-8 rounded-[2rem] border border-slate-100 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-lg font-black text-slate-800">
+                  Observabilité sécurité (Sprint 6)
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleLoadSecurityStatus}
+                    disabled={securityStatusBusy}
+                    className="px-4 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest"
+                  >
+                    {securityStatusBusy ? "Vérification..." : "Vérifier"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExportSecurityStatus}
+                    className="px-4 py-2 rounded-xl bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase tracking-widest"
+                  >
+                    Export JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExportSecurityStatusPdf}
+                    className="px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase tracking-widest"
+                  >
+                    Export PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopySecurityDiagnostic}
+                    className="px-4 py-2 rounded-xl bg-amber-50 text-amber-700 text-[10px] font-black uppercase tracking-widest"
+                  >
+                    Copier diagnostic
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyCriticalSecurityChecks}
+                    className="px-4 py-2 rounded-xl bg-rose-50 text-rose-700 text-[10px] font-black uppercase tracking-widest"
+                  >
+                    Copier critiques
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadCriticalSecurityChecks}
+                    className="px-4 py-2 rounded-xl bg-fuchsia-50 text-fuchsia-700 text-[10px] font-black uppercase tracking-widest"
+                  >
+                    Télécharger critiques
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadSecurityDiagnostic}
+                    className="px-4 py-2 rounded-xl bg-sky-50 text-sky-700 text-[10px] font-black uppercase tracking-widest"
+                  >
+                    Télécharger diagnostic
+                  </button>
+                </div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                <p className="text-[11px] font-black text-slate-700 uppercase tracking-widest">
+                  Vérification locale SHA-256
+                </p>
+                <div className="grid md:grid-cols-2 gap-2">
+                  <label className="text-[11px] text-slate-600 font-bold space-y-1">
+                    <span>Fichier exporté (JSON/PDF)</span>
+                    <input
+                      type="file"
+                      onChange={(e) => {
+                        setSecurityExportFile(e.target.files?.[0] || null);
+                        setSecurityVerifyResult(null);
+                      }}
+                      className="block w-full text-[11px] text-slate-600 file:mr-2 file:px-2 file:py-1 file:rounded-lg file:border-0 file:bg-white file:text-slate-700"
+                    />
+                  </label>
+                  <label className="text-[11px] text-slate-600 font-bold space-y-1">
+                    <span>Preuve SHA-256 (.sha256.txt)</span>
+                    <input
+                      type="file"
+                      accept=".txt,.sha256"
+                      onChange={(e) => {
+                        setSecurityProofFile(e.target.files?.[0] || null);
+                        setSecurityVerifyResult(null);
+                      }}
+                      className="block w-full text-[11px] text-slate-600 file:mr-2 file:px-2 file:py-1 file:rounded-lg file:border-0 file:bg-white file:text-slate-700"
+                    />
+                  </label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleVerifySecuritySha256}
+                    className="px-4 py-2 rounded-xl bg-white border border-slate-300 text-slate-700 text-[10px] font-black uppercase tracking-widest"
+                  >
+                    Vérifier .sha256.txt
+                  </button>
+                  {securityVerifyResult && (
+                    <span
+                      className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${
+                        securityVerifyResult.ok
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-rose-100 text-rose-700"
+                      }`}
+                    >
+                      {securityVerifyResult.ok ? "Valide" : "Invalide"}
+                    </span>
+                  )}
+                </div>
+                {securityVerifyResult && (
+                  <p className="text-[11px] font-bold text-slate-600">{securityVerifyResult.message}</p>
+                )}
+                <div className="pt-1 space-y-1">
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                    Historique (8 derniers)
+                  </p>
+                  {securityVerifyHistory.length === 0 ? (
+                    <p className="text-[11px] text-slate-500 font-bold">
+                      Aucune vérification enregistrée.
+                    </p>
+                  ) : (
+                    securityVerifyHistory.map((entry, idx) => (
+                      <div
+                        key={`${entry.at}-${idx}`}
+                        className="rounded-lg border border-slate-200 bg-white px-2 py-1.5"
+                      >
+                        <p className="text-[10px] font-black text-slate-700">
+                          {new Date(entry.at).toLocaleString()} -{" "}
+                          {entry.ok ? "VALIDE" : "INVALIDE"}
+                        </p>
+                        <p className="text-[10px] text-slate-600 font-bold">
+                          Export: {entry.exportFileName}
+                        </p>
+                        <p className="text-[10px] text-slate-600 font-bold">
+                          Preuve: {entry.proofFileName}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              {securityOperationalStatus ? (
+                <div className="space-y-3">
+                  {securityStatusStaleLevel !== "none" && (
+                    <div
+                      className={`rounded-xl px-3 py-2 border ${
+                        securityStatusStaleLevel === "critical"
+                          ? "border-rose-200 bg-rose-50"
+                          : "border-amber-200 bg-amber-50"
+                      }`}
+                    >
+                      <p
+                        className={`text-[11px] font-black uppercase tracking-widest ${
+                          securityStatusStaleLevel === "critical"
+                            ? "text-rose-700"
+                            : "text-amber-700"
+                        }`}
+                      >
+                        {securityStatusStaleLevel === "critical"
+                          ? "Statut potentiellement obsolète (critique)"
+                          : "Statut à rafraîchir"}
+                      </p>
+                      <p
+                        className={`text-[11px] font-bold ${
+                          securityStatusStaleLevel === "critical"
+                            ? "text-rose-700"
+                            : "text-amber-700"
+                        }`}
+                      >
+                        Dernière génération il y a {securityStatusAgeMinutes} min.
+                      </p>
+                    </div>
+                  )}
+                  {securityOperationalStatus.overall === "critical" && (
+                    <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
+                      <p className="text-[11px] font-black text-rose-700 uppercase tracking-widest">
+                        Alerte critique
+                      </p>
+                      <p className="text-[11px] text-rose-700 font-bold">
+                        Des points bloquants sécurité sont détectés. Corrige les checks critiques avant exploitation.
+                      </p>
+                    </div>
+                  )}
+                  <div
+                    className={`inline-flex px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${
+                      securityOperationalStatus.overall === "critical"
+                        ? "bg-rose-100 text-rose-700"
+                        : securityOperationalStatus.overall === "warning"
+                          ? "bg-amber-100 text-amber-700"
+                          : "bg-emerald-100 text-emerald-700"
+                    }`}
+                  >
+                    Statut global: {securityOperationalStatus.overall}
+                  </div>
+                  <p className="text-[11px] text-slate-500 font-bold">
+                    Généré le{" "}
+                    {new Date(securityOperationalStatus.generatedAt).toLocaleString()}
+                  </p>
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 space-y-2">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                      Résumé opérationnel
+                    </p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="px-2 py-1 rounded-lg bg-rose-100 text-rose-700 text-[10px] font-black uppercase">
+                        Critiques: {securityChecksSummary.critical}
+                      </span>
+                      <span className="px-2 py-1 rounded-lg bg-amber-100 text-amber-700 text-[10px] font-black uppercase">
+                        Warnings: {securityChecksSummary.warning}
+                      </span>
+                      <span className="px-2 py-1 rounded-lg bg-emerald-100 text-emerald-700 text-[10px] font-black uppercase">
+                        OK: {securityChecksSummary.ok}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 font-bold">
+                      {securityChecksSummary.recommendation}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {[
+                        { id: "all", label: "Tous" },
+                        { id: "critical", label: "Critiques" },
+                        { id: "warning", label: "Warnings" },
+                        { id: "ok", label: "OK" },
+                      ].map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() =>
+                            setSecurityCheckFilter(
+                              item.id as "all" | "critical" | "warning" | "ok",
+                            )
+                          }
+                          className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${
+                            securityCheckFilter === item.id
+                              ? "bg-slate-900 text-white border-slate-900"
+                              : "bg-white text-slate-600 border-slate-200"
+                          }`}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                    {filteredSecurityChecks.map((check, idx) => (
+                      <div
+                        key={`${check.key}-${idx}`}
+                        className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+                      >
+                        <p className="text-[11px] font-black text-slate-700">
+                          {check.key}
+                        </p>
+                        <p
+                          className={`text-[10px] font-black uppercase ${
+                            check.level === "critical"
+                              ? "text-rose-700"
+                              : check.level === "warning"
+                                ? "text-amber-700"
+                                : "text-emerald-700"
+                          }`}
+                        >
+                          {check.level}
+                        </p>
+                        <p className="text-[11px] text-slate-600 font-bold">
+                          {check.message}
+                        </p>
+                      </div>
+                    ))}
+                    {filteredSecurityChecks.length === 0 && (
+                      <p className="text-[11px] text-slate-500 font-bold">
+                        Aucun check pour ce filtre.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs font-bold text-slate-500">
+                  Lance une vérification pour afficher l&apos;état sécurité opérationnel.
+                </p>
+              )}
+            </div>
             <div className="bg-white p-8 rounded-[2rem] border border-slate-100 space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-lg font-black text-slate-800">
@@ -4230,13 +6965,16 @@ const SettingsManager: React.FC = () => {
                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
                   {printRoutingMode === "CLOUD"
                     ? "Cloud (agent)"
-                    : "Local (serveur)"}
+                    : printRoutingMode === "DESKTOP_BRIDGE"
+                      ? "Desktop Bridge"
+                      : "Local (serveur)"}
                 </span>
               </div>
               <p className="text-xs font-bold text-slate-500">
                 Local garde le comportement historique (impression depuis le
-                serveur). Cloud utilise les terminaux agents AppWin et leurs
-                imprimantes remontées.
+                serveur). Cloud utilise les terminaux agents AppWin. Desktop
+                Bridge envoie les jobs à une application locale en
+                arrière-plan.
               </p>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -4261,8 +6999,102 @@ const SettingsManager: React.FC = () => {
                 >
                   Cloud (agent)
                 </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateSettings({ printRoutingMode: "DESKTOP_BRIDGE" } as any)
+                  }
+                  className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${
+                    printRoutingMode === "DESKTOP_BRIDGE"
+                      ? "bg-indigo-600 text-white"
+                      : "bg-slate-100 text-slate-700"
+                  }`}
+                >
+                  Desktop Bridge
+                </button>
               </div>
             </div>
+
+            {printRoutingMode === "DESKTOP_BRIDGE" ? (
+              <div className="bg-white p-8 rounded-[2rem] border border-slate-100 space-y-4">
+                <h3 className="text-lg font-black text-slate-800">
+                  Bridge local (service arrière-plan)
+                </h3>
+                <p className="text-xs font-bold text-slate-500">
+                  Ton application desktop doit écouter en local (ex:
+                  http://127.0.0.1:17888). POS lui envoie les jobs d&apos;impression.
+                </p>
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+                  <label className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(desktopBridgeCfg?.enabled)}
+                      onChange={(e) =>
+                        updateSettings({
+                          desktopPrintBridge: {
+                            ...desktopBridgeCfg,
+                            enabled: e.target.checked,
+                          },
+                        } as any)
+                      }
+                    />
+                    Activé
+                  </label>
+                  <input
+                    type="text"
+                    value={String(desktopBridgeCfg?.url || "http://127.0.0.1:17888")}
+                    onChange={(e) =>
+                      updateSettings({
+                        desktopPrintBridge: {
+                          ...desktopBridgeCfg,
+                          url: e.target.value,
+                        },
+                      } as any)
+                    }
+                    placeholder="http://127.0.0.1:17888"
+                    className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold lg:col-span-2"
+                  />
+                  <input
+                    type="password"
+                    value={String(desktopBridgeCfg?.token || "")}
+                    onChange={(e) =>
+                      updateSettings({
+                        desktopPrintBridge: {
+                          ...desktopBridgeCfg,
+                          token: e.target.value,
+                        },
+                      } as any)
+                    }
+                    placeholder="Token (optionnel)"
+                    className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    type="number"
+                    min={500}
+                    max={30000}
+                    value={Number(desktopBridgeCfg?.timeoutMs || 4000)}
+                    onChange={(e) =>
+                      updateSettings({
+                        desktopPrintBridge: {
+                          ...desktopBridgeCfg,
+                          timeoutMs: Number(e.target.value || 4000),
+                        },
+                      } as any)
+                    }
+                    className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold w-[10rem]"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleTestDesktopBridge}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest"
+                  >
+                    Tester connexion
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             {printRoutingMode === "CLOUD" ? (
             <div className="bg-white p-8 rounded-[2rem] border border-slate-100 space-y-4">
@@ -4486,35 +7318,65 @@ const SettingsManager: React.FC = () => {
                   </p>
                 )}
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     if (!newPrinterName.trim()) return;
-                    if (newPrinterIsReceipt) {
-                      void addPrinter(newPrinterName.trim(), "RECEIPT", null);
-                    } else {
-                      const label = newPrinterStationLabel.trim();
-                      if (!label) {
-                        notifyError(
-                          "Indiquez un libellé de poste (ex. Bar, Terrasse).",
-                        );
-                        return;
+                    const isEditing = Boolean(editingPrinterId);
+                    try {
+                      if (newPrinterIsReceipt) {
+                        if (isEditing && editingPrinterId) {
+                          await updatePrinter(editingPrinterId, {
+                            name: newPrinterName.trim(),
+                            type: "RECEIPT",
+                            bonProfile: null,
+                          });
+                        } else {
+                          await addPrinter(newPrinterName.trim(), "RECEIPT", null);
+                        }
+                      } else {
+                        const label = newPrinterStationLabel.trim();
+                        if (!label) {
+                          notifyError(
+                            "Indiquez un libellé de poste (ex. Bar, Terrasse).",
+                          );
+                          return;
+                        }
+                        if (isEditing && editingPrinterId) {
+                          await updatePrinter(editingPrinterId, {
+                            name: newPrinterName.trim(),
+                            type: label,
+                            bonProfile: newPrinterBonProfile,
+                          });
+                        } else {
+                          await addPrinter(
+                            newPrinterName.trim(),
+                            label,
+                            newPrinterBonProfile,
+                          );
+                        }
                       }
-                      void addPrinter(
-                        newPrinterName.trim(),
-                        label,
-                        newPrinterBonProfile,
+                      notifySuccess(
+                        isEditing
+                          ? "Imprimante modifiée."
+                          : "Imprimante connectée.",
                       );
+                      resetPrinterForm();
+                    } catch (e: any) {
+                      notifyError(e?.message || "Impossible d'enregistrer l'imprimante.");
                     }
-                    setNewPrinterName("");
-                    setNewPrinterStationLabel("");
-                    setSelectedDetected("");
-                    setBonProfileTouched(false);
-                    setNewPrinterBonProfile("kitchen");
-                    setNewPrinterIsReceipt(false);
                   }}
                   className="w-full bg-indigo-600 text-white font-black py-4 rounded-2xl"
                 >
-                  Connecter
+                  {editingPrinterId ? "Enregistrer modification" : "Connecter"}
                 </button>
+                {editingPrinterId ? (
+                  <button
+                    type="button"
+                    onClick={resetPrinterForm}
+                    className="w-full bg-slate-100 text-slate-700 font-black py-3 rounded-2xl"
+                  >
+                    Annuler modification
+                  </button>
+                ) : null}
               </div>
             </div>
             <div className="bg-white p-10 rounded-[3rem] border border-slate-100">
@@ -4553,6 +7415,13 @@ const SettingsManager: React.FC = () => {
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => startEditPrinter(p)}
+                        className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-[10px] font-black uppercase text-slate-600"
+                      >
+                        Modifier
+                      </button>
                       {!isReceiptPrinter(p) ? (
                         <button
                           type="button"
@@ -5585,6 +8454,62 @@ const SettingsManager: React.FC = () => {
           </div>
         )}
       </div>
+      <HtmlTemplateDesigner
+        open={designerModalKind !== null}
+        title={
+          designerModalKind === "client"
+            ? "Designer visuel - Ticket client"
+            : designerModalKind === "kitchen"
+              ? "Designer visuel - Bon cuisine"
+              : "Designer visuel - Bon bar"
+        }
+        initialHtml={
+          designerModalKind === "client"
+            ? designerTemplates.clientHtml
+            : designerModalKind === "kitchen"
+              ? designerTemplates.kitchenHtml
+              : designerTemplates.barHtml
+        }
+        logoPreviewUrl={
+          genIdentity.logoUrl
+            ? `${genIdentity.logoUrl.startsWith("http") ? "" : (window.location.protocol + "//" + window.location.hostname + ":3001")}${genIdentity.logoUrl}`
+            : ""
+        }
+        onClose={() => setDesignerModalKind(null)}
+        onSave={async (html, css) => {
+          const full = `<style>${css || ""}</style>\n${html || ""}`;
+          const next = {
+            clientHtml:
+              designerModalKind === "client" ? full : String(designerTemplates.clientHtml || ""),
+            kitchenHtml:
+              designerModalKind === "kitchen" ? full : String(designerTemplates.kitchenHtml || ""),
+            barHtml:
+              designerModalKind === "bar" ? full : String(designerTemplates.barHtml || ""),
+          };
+          if (designerModalKind === "client") {
+            setDesignerTemplates((p) => ({ ...p, clientHtml: full }));
+          } else if (designerModalKind === "kitchen") {
+            setDesignerTemplates((p) => ({ ...p, kitchenHtml: full }));
+          } else if (designerModalKind === "bar") {
+            setDesignerTemplates((p) => ({ ...p, barHtml: full }));
+          }
+          try {
+            await updateSettings({
+              designerPrintTemplates: {
+                clientHtml: String(next.clientHtml || ""),
+                kitchenHtml: String(next.kitchenHtml || ""),
+                barHtml: String(next.barHtml || ""),
+              },
+            } as any);
+            notifySuccess("Template designer enregistré et appliqué.");
+          } catch (e: any) {
+            notifyError(
+              e?.message || "Impossible d'enregistrer le template designer.",
+            );
+          }
+          setDesignerModalKind(null);
+        }}
+      />
     </div>
   );
 };

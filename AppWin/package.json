@@ -1,7 +1,7 @@
 {
-  "name": "appwin",
+  "name": "axiaprinters",
   "version": "0.1.0",
-  "description": "AxiaFlex Windows desktop app (Electron + Node)",
+  "description": "AxiaPrinters Windows desktop app (Electron + Node)",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -10,7 +10,7 @@
     "dist:win:safe": "powershell -NoProfile -ExecutionPolicy Bypass -File ./build-win-safe.ps1"
   },
   "keywords": ["electron", "axiaflex", "print-agent"],
-  "author": "AxiaFlex",
+  "author": "AxiaPrinters",
   "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
@@ -19,7 +19,7 @@
   },
   "build": {
     "appId": "com.axiaflex.appwin",
-    "productName": "AxiaFlex AppWin",
+    "productName": "AxiaPrinters",
     "directories": {
       "output": "dist"
     },

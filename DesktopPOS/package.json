@@ -1,0 +1,72 @@
+{
+  "name": "desktop-pos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Application desktop POS (Electron) basee sur Frontend web existant.",
+  "main": "main.js",
+  "scripts": {
+    "setup:oneclick": "powershell -NoProfile -ExecutionPolicy Bypass -File ./setup-desktoppos-oneclick.ps1",
+    "predev": "node ./scripts/free-ports.cjs",
+    "prepare:standalone": "node ./scripts/prepare-standalone.cjs",
+    "install:standalone": "npm run prepare:standalone && npm --prefix ./backend install && npm --prefix ./frontend install",
+    "dev": "npm run predev && npm run prepare:standalone && concurrently -k \"npm:dev:backend\" \"npm:dev:web\" \"npm:dev:electron\"",
+    "dev:backend": "cross-env PORT=3313 npm --prefix ./backend run dev",
+    "dev:web": "cross-env VITE_API_URL=http://127.0.0.1:3313 npm --prefix ./frontend run dev -- --host 127.0.0.1 --port 3010 --strictPort",
+    "dev:electron": "cross-env DESKTOP_POS_DEV_URL=http://127.0.0.1:3010 wait-on tcp:3010 && electron .",
+    "start": "electron .",
+    "build:backend": "npm --prefix ./backend run build",
+    "build:web": "cross-env VITE_API_URL=http://127.0.0.1:3313 npm --prefix ./frontend run build",
+    "build:standalone": "npm run prepare:standalone && npm --prefix ./backend install && npm run build:backend && npm run build:web",
+    "build": "npm run build:standalone && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "cross-env": "^7.0.3",
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.axia.desktoppos",
+    "productName": "Axia Desktop POS",
+    "files": [
+      "main.js",
+      "preload.js",
+      "installer/**",
+      "assets/**",
+      "frontend/dist/**",
+      "backend/dist/**",
+      "backend/node_modules/**",
+      "backend/package.json",
+      "backend/package-lock.json"
+    ],
+    "extraResources": [
+      {
+        "from": "installer",
+        "to": "installer",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "include": "build/installer.nsh"
+    }
+  }
+}

@@ -38,4 +38,6 @@ temp/
 Backend/audit-logs/
 Backend/data/audit-logs/
 Backend/uploads/
+Backend/SIC.sh
+Backend/SMDF.sh
 

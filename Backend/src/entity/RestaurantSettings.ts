@@ -36,6 +36,14 @@ export class RestaurantSettings {
   @Column('decimal', { precision: 6, scale: 2, default: 0 })
   tvaRate!: number;
 
+  /** Catalogue TVA compatible A4/A5 (code, libelle, taux). */
+  @Column({ type: 'jsonb', nullable: true })
+  tvaCatalog?: unknown;
+
+  /** Mapping catégorie article -> famille fiscale (Sprint 5). */
+  @Column({ type: 'jsonb', nullable: true })
+  fiscalCategoryCatalog?: unknown;
+
   @Column('boolean', { default: true })
   applyTvaToTicket!: boolean;
 
@@ -51,9 +59,37 @@ export class RestaurantSettings {
   @Column('boolean', { default: false })
   printPreviewOnValidate!: boolean;
 
-  /** Routage impression: LOCAL (serveur local) ou CLOUD (agent AppWin). */
+  /** Impression automatique quand l'aperçu ticket est ouvert dans l'UI. */
+  @Column('boolean', { default: true })
+  printAutoOnPreview!: boolean;
+
+  /** Routage impression: LOCAL, CLOUD (agent AppWin) ou DESKTOP_BRIDGE (app locale dédiée). */
   @Column('varchar', { length: 16, default: 'LOCAL' })
-  printRoutingMode!: 'LOCAL' | 'CLOUD';
+  printRoutingMode!: 'LOCAL' | 'CLOUD' | 'DESKTOP_BRIDGE';
+
+  /** Active la logique fiscale NACEF sur le flux ticket client. */
+  @Column('boolean', { default: false })
+  nacefEnabled!: boolean;
+
+  /** Politique de blocage NACEF (souple ou stricte). */
+  @Column('varchar', { length: 8, default: 'SOFT' })
+  nacefEnforcementMode!: 'SOFT' | 'HARD';
+
+  /** Mode d'execution NACEF: simulation locale ou module distant. */
+  @Column('varchar', { length: 16, default: 'SIMULATED' })
+  nacefMode!: 'SIMULATED' | 'REMOTE';
+
+  /** Identifiant IMDF utilise pour signer les tickets fiscaux. */
+  @Column('varchar', { length: 64, nullable: true })
+  nacefImdf?: string | null;
+
+  /** Endpoint S-MDF distant utilise en mode REMOTE. */
+  @Column('varchar', { length: 500, default: 'http://127.0.0.1:10006' })
+  nacefBaseUrl!: string;
+
+  /** Configuration du bridge desktop local (app Windows en arrière-plan). */
+  @Column({ type: 'jsonb', nullable: true })
+  desktopPrintBridge?: unknown;
 
   /** Force une UI tactile (boutons/champs plus grands) même sur PC. */
   @Column('boolean', { default: false })
@@ -89,6 +125,14 @@ export class RestaurantSettings {
   /** Modèles d'impression bons de production (cuisine/bar). */
   @Column({ type: 'jsonb', nullable: true })
   kitchenBarPrintTemplates?: unknown;
+
+  /** Templates HTML designer gratuits (client/bar/cuisine). */
+  @Column({ type: 'jsonb', nullable: true })
+  designerPrintTemplates?: unknown;
+  
+  /** Source d'impression par flux: BUILTIN ou DESIGNER (client/cuisine/bar). */
+  @Column({ type: 'jsonb', nullable: true })
+  printTemplateSource?: unknown;
 
   @Column('boolean', { default: true })
   preventSaleOnInsufficientStock!: boolean;

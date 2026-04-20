@@ -22,12 +22,13 @@ function op(tag: string, summary: string, pathParams: string[] = [], description
   };
 }
 
+/** Opération OpenAPI complète (schémas requestBody / security) ou résumé court `op()`. */
 type PathItem = Partial<{
-  get: OpenApiOp;
-  post: OpenApiOp;
-  put: OpenApiOp;
-  patch: OpenApiOp;
-  delete: OpenApiOp;
+  get: OpenApiOp | Record<string, unknown>;
+  post: OpenApiOp | Record<string, unknown>;
+  put: OpenApiOp | Record<string, unknown>;
+  patch: OpenApiOp | Record<string, unknown>;
+  delete: OpenApiOp | Record<string, unknown>;
 }>;
 
 /**
@@ -263,6 +264,165 @@ export const openApiPaths: Record<string, PathItem> = {
     post: op('ClientPortal', 'Commande client : demande de paiement', ['id']),
   },
 
+  '/pos/preorders/auth/signup': {
+    post: {
+      tags: ['Preorders'],
+      summary: 'Inscription client (précommande)',
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/PreorderSignupBody' },
+          },
+        },
+      },
+      responses: {
+        '200': {
+          description: 'Compte créé (profil sans mot de passe)',
+        },
+        '400': {
+          description: 'Erreur (email déjà utilisé, validation)',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/PreorderError' },
+            },
+          },
+        },
+      },
+    },
+  },
+  '/pos/preorders/auth/signin': {
+    post: {
+      tags: ['Preorders'],
+      summary: 'Connexion client — retourne un jeton Bearer',
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/PreorderSigninBody' },
+          },
+        },
+      },
+      responses: {
+        '200': {
+          description: 'Jeton à utiliser dans Authorization: Bearer …',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/PreorderSigninResponse' },
+            },
+          },
+        },
+        '400': {
+          description: 'Identifiants invalides',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/PreorderError' },
+            },
+          },
+        },
+      },
+    },
+  },
+  '/pos/preorders/menu': {
+    get: {
+      tags: ['Preorders'],
+      summary: 'Menu public (produits visibles pour précommande)',
+      responses: {
+        '200': {
+          description: 'Liste de produits',
+        },
+      },
+    },
+  },
+  '/pos/preorders': {
+    get: {
+      tags: ['Preorders'],
+      summary: 'Liste des précommandes (filtrées par utilisateur si Bearer)',
+      description:
+        'Avec en-tête Authorization Bearer (jeton renvoyé par signin), la liste est filtrée par client.',
+      security: [{ bearerAuth: [] }],
+      responses: {
+        '200': { description: 'OK' },
+        '500': {
+          description: 'Erreur serveur',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/PreorderError' },
+            },
+          },
+        },
+      },
+    },
+    post: {
+      tags: ['Preorders'],
+      summary: 'Créer une précommande',
+      security: [{ bearerAuth: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/PreorderCreateBody' },
+          },
+        },
+      },
+      responses: {
+        '200': { description: 'Précommande créée' },
+        '400': {
+          description: 'Validation',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/PreorderError' },
+            },
+          },
+        },
+      },
+    },
+  },
+  '/pos/preorders/me': {
+    get: {
+      tags: ['Preorders'],
+      summary: 'Profil client lié au jeton',
+      security: [{ bearerAuth: [] }],
+      responses: {
+        '200': { description: 'Profil' },
+        '401': {
+          description: 'Jeton manquant ou invalide',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/PreorderError' },
+            },
+          },
+        },
+      },
+    },
+  },
+  '/pos/preorders/{id}/status': {
+    patch: {
+      tags: ['Preorders'],
+      summary: 'Mettre à jour le statut d’une précommande',
+      parameters: [pathParam('id')],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/PreorderStatusBody' },
+          },
+        },
+      },
+      responses: {
+        '200': { description: 'Mis à jour' },
+        '400': {
+          description: 'Erreur',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/PreorderError' },
+            },
+          },
+        },
+      },
+    },
+  },
+
   '/pos/printers': {
     get: op('Printers', 'Lister les imprimantes'),
     post: op('Printers', 'Créer une imprimante'),
@@ -272,6 +432,9 @@ export const openApiPaths: Record<string, PathItem> = {
   },
   '/pos/printers/test-print': {
     post: op('Printers', 'Test d\'impression'),
+  },
+  '/pos/printers/test-receipt-print': {
+    post: op('Printers', 'Test d\'impression ticket client'),
   },
   '/pos/printers/{id}': {
     delete: op('Printers', 'Supprimer une imprimante', ['id']),
@@ -454,5 +617,20 @@ export const openApiPaths: Record<string, PathItem> = {
       'Réservé rôle ADMIN.',
     ),
     post: op('Settings', 'Ajouter une note au journal admin', [], 'Body: userId, message.'),
+  },
+  '/sic/external/manifest': {
+    get: op('NACEF', 'Manifest S-MDF (compatibilité collection officielle)'),
+  },
+  '/sic/external/certificate/request': {
+    post: op('NACEF', 'Demande certificat (compatibilité collection officielle)'),
+  },
+  '/sic/external/sync/request': {
+    post: op('NACEF', 'Synchronisation S-MDF (compatibilité collection officielle)'),
+  },
+  '/sic/external/sign/request': {
+    post: op('NACEF', 'Signature ticket (compatibilité collection officielle)'),
+  },
+  '/sic/external/log': {
+    post: op('NACEF', 'Journalisation LC vers S-MDF (compatibilité collection officielle)'),
   },
 };

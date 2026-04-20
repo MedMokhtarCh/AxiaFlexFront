@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-Write-Host "[AppWin] Nettoyage cache download Electron..." -ForegroundColor Cyan
+Write-Host "[AxiaPrinters] Nettoyage cache download Electron..." -ForegroundColor Cyan
 Remove-Item "$env:LOCALAPPDATA\electron-builder\Cache" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$env:LOCALAPPDATA\electron\Cache" -Recurse -Force -ErrorAction SilentlyContinue
 
@@ -11,12 +11,12 @@ $env:CSC_IDENTITY_AUTO_DISCOVERY = "false"
 $env:WIN_CSC_LINK = ""
 $env:WIN_CSC_KEY_PASSWORD = ""
 
-Write-Host "[AppWin] Build NSIS en mode safe..." -ForegroundColor Yellow
+Write-Host "[AxiaPrinters] Build NSIS en mode safe..." -ForegroundColor Yellow
 npx electron-builder --win nsis
 
 if ($LASTEXITCODE -ne 0) {
-  Write-Host "[AppWin] Echec build. Essayez via un autre reseau (hotspot 4G) ou sans inspection SSL proxy/antivirus." -ForegroundColor Red
+  Write-Host "[AxiaPrinters] Echec build. Essayez via un autre reseau (hotspot 4G) ou sans inspection SSL proxy/antivirus." -ForegroundColor Red
   exit $LASTEXITCODE
 }
 
-Write-Host "[AppWin] Build termine. Voir dossier dist/." -ForegroundColor Green
+Write-Host "[AxiaPrinters] Build termine. Voir dossier dist/." -ForegroundColor Green

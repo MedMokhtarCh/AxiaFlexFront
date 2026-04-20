@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AxiaFlex AppWin</title>
+    <title>AxiaPrinters</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="container">
-      <h1>AxiaFlex AppWin (Electron)</h1>
+      <h1>AxiaPrinters (Electron)</h1>
       <p class="subtitle">
         Configuration et contrôle du Print Agent local (USB / réseau).
       </p>
@@ -71,6 +71,57 @@
           <button id="openWorkerLogBtn">Verifier log agent</button>
           <button id="uninstallServiceBtn" class="danger">Supprimer démarrage auto</button>
           <button id="refreshServiceBtn">Rafraîchir statut</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Desktop Bridge (one-click)</h2>
+        <p class="muted">
+          Lance ton application Desktop Bridge en arrière-plan et configure son auto-démarrage Windows.
+        </p>
+        <div class="grid">
+          <label>
+            Installateur Bridge (.exe/.msi)
+            <div class="input-inline">
+              <input id="bridgeInstallerPath" placeholder="C:\Installers\DesktopBridgeSetup.exe" />
+              <button id="bridgePickInstallerBtn" type="button" class="icon-btn" title="Parcourir">...</button>
+            </div>
+          </label>
+          <label>
+            EXE Bridge
+            <input id="bridgeExePath" placeholder="C:\Program Files\MyBridge\DesktopBridge.exe" />
+          </label>
+          <label>
+            Arguments (optionnel)
+            <input id="bridgeArgs" placeholder="--minimized" />
+          </label>
+          <label>
+            URL Health
+            <input id="bridgeHealthUrl" placeholder="http://127.0.0.1:17888/health" />
+          </label>
+          <label>
+            Port bridge local AxiaPrinters
+            <input id="bridgeLocalPort" type="number" min="1024" max="65535" placeholder="17888" />
+          </label>
+          <label>
+            Token bridge local (optionnel)
+            <input id="bridgeLocalToken" type="password" placeholder="Bearer token" />
+          </label>
+          <label>
+            Nom tâche
+            <input id="bridgeTaskName" placeholder="AxiaPrintersDesktopBridgeAutostart" />
+          </label>
+        </div>
+        <p id="bridgeServerStatusText" class="muted"></p>
+        <div class="actions">
+          <button id="bridgeInstallAppBtn">Installer l'app Bridge</button>
+          <button id="bridgeServerRestartBtn">Redémarrer bridge local</button>
+          <button id="bridgeServerStatusBtn">Statut bridge local</button>
+          <button id="bridgeStartBtn" class="success">Démarrer maintenant</button>
+          <button id="bridgeInstallBtn">Installer auto-start</button>
+          <button id="bridgeUninstallBtn" class="danger">Supprimer auto-start</button>
+          <button id="bridgeStatusBtn">Statut tâche</button>
+          <button id="bridgeHealthBtn">Tester health</button>
         </div>
       </section>
 

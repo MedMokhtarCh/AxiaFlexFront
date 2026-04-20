@@ -9,6 +9,16 @@ const els = {
   terminalAlias: byId("terminalAlias"),
   siteName: byId("siteName"),
   pollMs: byId("pollMs"),
+  bridgeInstallerPath: byId("bridgeInstallerPath"),
+  bridgePickInstallerBtn: byId("bridgePickInstallerBtn"),
+  bridgeInstallAppBtn: byId("bridgeInstallAppBtn"),
+  bridgeExePath: byId("bridgeExePath"),
+  bridgeArgs: byId("bridgeArgs"),
+  bridgeHealthUrl: byId("bridgeHealthUrl"),
+  bridgeLocalPort: byId("bridgeLocalPort"),
+  bridgeLocalToken: byId("bridgeLocalToken"),
+  bridgeTaskName: byId("bridgeTaskName"),
+  bridgeServerStatusText: byId("bridgeServerStatusText"),
   saveBtn: byId("saveBtn"),
   startBtn: byId("startBtn"),
   stopBtn: byId("stopBtn"),
@@ -22,6 +32,13 @@ const els = {
   openWorkerLogBtn: byId("openWorkerLogBtn"),
   uninstallServiceBtn: byId("uninstallServiceBtn"),
   refreshServiceBtn: byId("refreshServiceBtn"),
+  bridgeStartBtn: byId("bridgeStartBtn"),
+  bridgeInstallBtn: byId("bridgeInstallBtn"),
+  bridgeUninstallBtn: byId("bridgeUninstallBtn"),
+  bridgeStatusBtn: byId("bridgeStatusBtn"),
+  bridgeServerRestartBtn: byId("bridgeServerRestartBtn"),
+  bridgeServerStatusBtn: byId("bridgeServerStatusBtn"),
+  bridgeHealthBtn: byId("bridgeHealthBtn"),
   refreshPrintersBtn: byId("refreshPrintersBtn"),
   printersSelect: byId("printersSelect"),
   testPrintText: byId("testPrintText"),
@@ -91,7 +108,7 @@ function setServiceStatus(statusObj) {
     } else {
       setTaskHealth(`Erreur (${lrCode})`, "err");
     }
-    els.serviceStatusText.textContent = `Tache "${statusObj.taskName || "AxiaFlexPrintAgent"}": ${statusObj.state || "?"} | dernier run: ${lr} | code: ${lrCode}`;
+    els.serviceStatusText.textContent = `Tache "${statusObj.taskName || "AxiaPrintersPrintAgent"}": ${statusObj.state || "?"} | dernier run: ${lr} | code: ${lrCode}`;
     return;
   }
   setTaskHealth("Inconnu", "neutral");
@@ -99,6 +116,13 @@ function setServiceStatus(statusObj) {
     els.taskHealthBadge.title = "Statut de tâche non disponible.";
   }
   els.serviceStatusText.textContent = `Statut: ${JSON.stringify(statusObj)}`;
+}
+
+function setBridgeServerStatusText(s) {
+  const msg = s?.running
+    ? `Bridge local AxiaPrinters: ONLINE sur port ${s.port || "?"}`
+    : `Bridge local AxiaPrinters: OFFLINE (enabled=${Boolean(s?.enabled)})`;
+  els.bridgeServerStatusText.textContent = msg;
 }
 
 async function refreshServiceStatus() {
@@ -132,6 +156,18 @@ async function saveConfig() {
     terminalAlias: els.terminalAlias.value.trim(),
     siteName: els.siteName.value.trim(),
     pollMs: Number.parseInt(els.pollMs.value || "3000", 10),
+    desktopBridge: {
+      installerPath: String(els.bridgeInstallerPath.value || "").trim(),
+      exePath: String(els.bridgeExePath.value || "").trim(),
+      args: String(els.bridgeArgs.value || "").trim(),
+      healthUrl: String(els.bridgeHealthUrl.value || "").trim(),
+      taskName:
+        String(els.bridgeTaskName.value || "").trim() ||
+        "AxiaPrintersDesktopBridgeAutostart",
+      localServerEnabled: true,
+      localServerPort: Number(els.bridgeLocalPort.value || 17888),
+      localServerToken: String(els.bridgeLocalToken.value || "").trim(),
+    },
   });
   appendLog("Configuration enregistree.");
 }
@@ -143,12 +179,26 @@ async function init() {
   els.terminalAlias.value = String(cfg.terminalAlias || "TERMINAL-1");
   els.siteName.value = String(cfg.siteName || "SITE-A");
   els.pollMs.value = String(cfg.pollMs || 3000);
+  const bridge = cfg?.desktopBridge || {};
+  els.bridgeInstallerPath.value = String(bridge.installerPath || "");
+  els.bridgeExePath.value = String(bridge.exePath || "");
+  els.bridgeArgs.value = String(bridge.args || "");
+  els.bridgeHealthUrl.value = String(
+    bridge.healthUrl || "http://127.0.0.1:17888/health",
+  );
+  els.bridgeLocalPort.value = String(bridge.localServerPort || 17888);
+  els.bridgeLocalToken.value = String(bridge.localServerToken || "");
+  els.bridgeTaskName.value = String(
+    bridge.taskName || "AxiaPrintersDesktopBridgeAutostart",
+  );
 
   const status = await appWinApi.getAgentStatus();
   setStatus(Boolean(status.running));
   els.agentPathText.textContent = `Script agent: ${status.agentScriptPath || "N/A"}`;
   (status.logs || []).forEach((line) => appendLog(line));
   await refreshServiceStatus();
+  const bridgeSrv = await appWinApi.desktopBridgeServerStatus();
+  setBridgeServerStatusText(bridgeSrv);
   await refreshPrinters();
 }
 
@@ -224,13 +274,100 @@ els.refreshServiceBtn.addEventListener("click", async () => {
   await refreshServiceStatus();
 });
 
+els.bridgeStartBtn.addEventListener("click", async () => {
+  await saveConfig();
+  const res = await appWinApi.desktopBridgeStartNow();
+  appendLog(
+    res?.ok
+      ? "Desktop Bridge demarre."
+      : `Erreur Desktop Bridge start: ${res?.stderr || res?.stdout || res?.error || "inconnue"}`,
+  );
+});
+
+els.bridgePickInstallerBtn.addEventListener("click", async () => {
+  const res = await appWinApi.desktopBridgePickInstaller();
+  if (res?.ok && res?.path) {
+    els.bridgeInstallerPath.value = String(res.path);
+    appendLog(`Installateur sélectionné: ${res.path}`);
+  }
+});
+
+els.bridgeInstallAppBtn.addEventListener("click", async () => {
+  await saveConfig();
+  const res = await appWinApi.desktopBridgeInstallApp();
+  appendLog(
+    res?.ok
+      ? `Installation Bridge terminée: ${res?.stdout || "OK"}`
+      : `Erreur installation Bridge: ${res?.stderr || res?.stdout || res?.error || "inconnue"}`,
+  );
+});
+
+els.bridgeInstallBtn.addEventListener("click", async () => {
+  await saveConfig();
+  const res = await appWinApi.desktopBridgeInstallAutostart();
+  appendLog(
+    res?.ok
+      ? `Auto-start Desktop Bridge installe: ${res?.stdout || "OK"}`
+      : `Erreur install auto-start Desktop Bridge: ${res?.stderr || res?.stdout || res?.error || "inconnue"}`,
+  );
+});
+
+els.bridgeUninstallBtn.addEventListener("click", async () => {
+  await saveConfig();
+  const res = await appWinApi.desktopBridgeUninstallAutostart();
+  appendLog(
+    res?.ok
+      ? `Auto-start Desktop Bridge supprime: ${res?.stdout || "OK"}`
+      : `Erreur suppression auto-start Desktop Bridge: ${res?.stderr || res?.stdout || res?.error || "inconnue"}`,
+  );
+});
+
+els.bridgeStatusBtn.addEventListener("click", async () => {
+  await saveConfig();
+  const res = await appWinApi.desktopBridgeStatus();
+  appendLog(
+    res?.ok
+      ? `Desktop Bridge task status: ${JSON.stringify(res?.status || {})}`
+      : `Erreur statut Desktop Bridge: ${res?.error || "inconnue"}`,
+  );
+});
+
+els.bridgeServerStatusBtn.addEventListener("click", async () => {
+  await saveConfig();
+  const res = await appWinApi.desktopBridgeServerStatus();
+  setBridgeServerStatusText(res);
+  appendLog(`Bridge local status: ${JSON.stringify(res || {})}`);
+});
+
+els.bridgeServerRestartBtn.addEventListener("click", async () => {
+  await saveConfig();
+  const res = await appWinApi.desktopBridgeServerRestart();
+  const status = await appWinApi.desktopBridgeServerStatus();
+  setBridgeServerStatusText(status);
+  appendLog(
+    res?.ok
+      ? `Bridge local redémarré: ${JSON.stringify(res)}`
+      : `Erreur redémarrage bridge local: ${res?.error || "inconnue"}`,
+  );
+});
+
+els.bridgeHealthBtn.addEventListener("click", async () => {
+  await saveConfig();
+  const res = await appWinApi.desktopBridgeTestHealth();
+  appendLog(
+    res?.ok
+      ? `Desktop Bridge health OK: ${res?.stdout || ""}`
+      : `Desktop Bridge health KO: ${res?.stderr || res?.stdout || res?.error || "offline"}`,
+  );
+});
+
 els.refreshPrintersBtn.addEventListener("click", async () => {
   await refreshPrinters();
 });
 
 els.testPrintBtn.addEventListener("click", async () => {
   const printerName = String(els.printersSelect.value || "").trim();
-  const text = String(els.testPrintText.value || "").trim() || "Test impression AxiaFlex";
+  const text = String(els.testPrintText.value || "").trim() || "Test impression AxiaPrinters";
   if (!printerName) {
     appendLog("Choisissez une imprimante.");
     return;

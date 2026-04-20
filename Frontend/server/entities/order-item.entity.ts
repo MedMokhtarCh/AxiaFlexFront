@@ -8,7 +8,7 @@ export class OrderItem {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ type: 'varchar', length: 160 })
   name: string;
 
   @Column({ type: 'decimal', precision: 10, scale: 3 })
@@ -29,6 +29,6 @@ export class OrderItem {
   @ManyToOne(() => Product)
   product: Product;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', length: 128, nullable: true })
   variantId: string;
 }

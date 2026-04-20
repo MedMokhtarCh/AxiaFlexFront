@@ -4,29 +4,40 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: posdb
+      POSTGRES_PASSWORD: Axia/2023**
+      POSTGRES_DB: axiaflex
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d axiaflex"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   backend:
     build:
       context: ./Backend
       dockerfile: Dockerfile
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:Axia%2F2023%2A%2A@db:5432/axiaflex?schema=public
       DB_HOST: db
       DB_PORT: 5432
       DB_USER: postgres
-      DB_PASSWORD: postgres
-      DB_NAME: posdb
-      PORT: 3000
+      DB_PASSWORD: Axia/2023**
+      DB_NAME: axiaflex
+      PORT: 3003
+      NACEF_MODE: SIMULATED
+      NACEF_AUTO_BOOTSTRAP: "1"
+      SIC_BASE_URL: http://backend:3003/sic/external
+      NACEF_IMDF: IMDF-001
     ports:
-      - "3000:3000"
+      - "3003:3003"
     volumes:
       - ./Backend:/app
       - /app/node_modules
@@ -37,13 +48,14 @@ services:
       context: ./Frontend
       dockerfile: Dockerfile
     ports:
-      - "5173:5173"
+      - "3000:3000"
     volumes:
       - ./Frontend:/app
       - /app/node_modules
     environment:
+      VITE_PROXY_TARGET: http://backend:3003
       CHOKIDAR_USEPOLLING: 'true'
-    command: ["npm","run","dev","--","--host","0.0.0.0"]
+    command: ["npm","run","dev","--","--host","0.0.0.0","--port","3000"]
 
   pgadmin:
     image: dpage/pgadmin4:7

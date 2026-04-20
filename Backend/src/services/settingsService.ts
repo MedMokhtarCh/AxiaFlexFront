@@ -7,6 +7,7 @@ const defaultPosDiscountPresets = [
   { id: 'preset-staff', label: 'Staff', type: 'PERCENT' as const, value: 50 },
   { id: 'preset-vip', label: 'Offert VIP', type: 'PERCENT' as const, value: 100 },
 ];
+const SECRET_MASK = '********';
 
 const defaults = {
   companyType: 'RESTAURANT_CAFE',
@@ -26,12 +27,28 @@ const defaults = {
   ],
   timbreValue: 1.0,
   tvaRate: 19,
+  tvaCatalog: [
+    { code: 'TVA_STD', label: 'TVA standard', rate: 19 },
+  ],
+  fiscalCategoryCatalog: [] as Array<{ articleCategory: string; familyCode: string; label?: string }>,
   applyTvaToTicket: true,
   applyTvaToInvoice: true,
   applyTimbreToTicket: true,
   applyTimbreToInvoice: true,
   printPreviewOnValidate: false,
-  printRoutingMode: 'LOCAL' as const,
+  printAutoOnPreview: true,
+  printRoutingMode: 'DESKTOP_BRIDGE' as const,
+  nacefEnabled: false,
+  nacefEnforcementMode: 'SOFT' as const,
+  nacefMode: 'SIMULATED' as const,
+  nacefImdf: '',
+  nacefBaseUrl: 'http://127.0.0.1:10006',
+  desktopPrintBridge: {
+    enabled: true,
+    url: 'http://127.0.0.1:17888',
+    token: '',
+    timeoutMs: 4000,
+  },
   touchUiMode: false,
   clientKdsDisplayMode: 'STANDARD',
   clientKdsWallboardMinWidthPx: 1920,
@@ -84,6 +101,16 @@ const defaults = {
       showItemNotes: true,
     },
   },
+  designerPrintTemplates: {
+    clientHtml: '',
+    kitchenHtml: '',
+    barHtml: '',
+  },
+  printTemplateSource: {
+    client: 'BUILTIN' as const,
+    kitchen: 'BUILTIN' as const,
+    bar: 'BUILTIN' as const,
+  },
   preventSaleOnInsufficientStock: true,
   currency: 'DT',
   terminalId: '',
@@ -121,10 +148,41 @@ const normalizeCashClosingModePreference = (value: any): 'AUTO' | 'INDEPENDENT' 
   return 'AUTO';
 };
 
-const normalizePrintRoutingMode = (value: any): 'LOCAL' | 'CLOUD' => {
+const normalizePrintRoutingMode = (value: any): 'LOCAL' | 'CLOUD' | 'DESKTOP_BRIDGE' => {
   const raw = String(value ?? 'LOCAL').trim().toUpperCase();
-  return raw === 'CLOUD' ? 'CLOUD' : 'LOCAL';
+  if (raw === 'CLOUD') return 'CLOUD';
+  if (raw === 'DESKTOP_BRIDGE' || raw === 'DESKTOP') return 'DESKTOP_BRIDGE';
+  return 'LOCAL';
 };
+const normalizeNacefEnforcementMode = (value: any): 'SOFT' | 'HARD' => {
+  const raw = String(value ?? 'SOFT').trim().toUpperCase();
+  return raw === 'HARD' ? 'HARD' : 'SOFT';
+};
+const normalizeNacefMode = (value: any): 'SIMULATED' | 'REMOTE' => {
+  const raw = String(value ?? 'SIMULATED').trim().toUpperCase();
+  return raw === 'REMOTE' ? 'REMOTE' : 'SIMULATED';
+};
+const normalizeNacefImdf = (value: any) =>
+  String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .slice(0, 64);
+const normalizeNacefBaseUrl = (value: any) =>
+  String(value ?? defaults.nacefBaseUrl)
+    .trim()
+    .slice(0, 500);
+function normalizeDesktopPrintBridge(raw: any) {
+  const base = (defaults as any).desktopPrintBridge || {};
+  const timeoutMs = Number(raw?.timeoutMs ?? base.timeoutMs ?? 4000);
+  return {
+    enabled: Boolean(raw?.enabled ?? base.enabled),
+    url: String(raw?.url ?? base.url ?? 'http://127.0.0.1:17888')
+      .trim()
+      .slice(0, 500),
+    token: String(raw?.token ?? base.token ?? '').trim().slice(0, 500),
+    timeoutMs: Number.isFinite(timeoutMs) ? Math.max(500, Math.min(30000, timeoutMs)) : 4000,
+  };
+}
 
 /** Mode effectif après application du paramètre et du type de société. */
 export function effectiveCashClosingMode(
@@ -207,6 +265,22 @@ const normalizeKitchenBarPrintTemplates = (raw: any) => {
     bar: normalizeProductionTemplate(raw?.bar, base.bar),
   };
 };
+const normalizeDesignerPrintTemplates = (raw: any) => {
+  const base = (defaults as any).designerPrintTemplates || {};
+  return {
+    clientHtml: String(raw?.clientHtml ?? base.clientHtml ?? '').slice(0, 300_000),
+    kitchenHtml: String(raw?.kitchenHtml ?? base.kitchenHtml ?? '').slice(0, 300_000),
+    barHtml: String(raw?.barHtml ?? base.barHtml ?? '').slice(0, 300_000),
+  };
+};
+const normalizePrintTemplateSource = (raw: any) => {
+  const norm = (v: any) => String(v || '').toUpperCase() === 'DESIGNER' ? 'DESIGNER' : 'BUILTIN';
+  return {
+    client:  norm(raw?.client),
+    kitchen: norm(raw?.kitchen),
+    bar:     norm(raw?.bar),
+  };
+};
 
 const parseNumeric = (value: any) => {
   if (value === null || value === undefined) return 0;
@@ -253,6 +327,37 @@ function normalizeExternalRestaurantCardApi(raw: any) {
   };
 }
 
+function applySecretMask(value: any) {
+  const token = String(value || '').trim();
+  return token ? SECRET_MASK : '';
+}
+
+function mergeSecretTokenInput(
+  incomingToken: any,
+  existingToken: any,
+  defaultToken: any = '',
+) {
+  const incoming = String(incomingToken ?? '').trim();
+  if (!incoming) return '';
+  if (incoming === SECRET_MASK) {
+    return String(existingToken ?? defaultToken ?? '').trim();
+  }
+  return incoming;
+}
+
+function maskSensitiveSettings(base: any) {
+  const out = { ...base };
+  const desktopPrintBridge = { ...((out as any).desktopPrintBridge || {}) };
+  desktopPrintBridge.token = applySecretMask(desktopPrintBridge.token);
+  (out as any).desktopPrintBridge = desktopPrintBridge;
+  const externalRestaurantCardApi = {
+    ...((out as any).externalRestaurantCardApi || {}),
+  };
+  externalRestaurantCardApi.token = applySecretMask(externalRestaurantCardApi.token);
+  (out as any).externalRestaurantCardApi = externalRestaurantCardApi;
+  return out;
+}
+
 function normalizeReceiptPdfDirectory(raw: any) {
   return String(raw ?? '').trim().slice(0, 500);
 }
@@ -280,6 +385,87 @@ function normalizePredefinedNotes(raw: any) {
   return out.length > 0 ? out : [...defaults.predefinedNotes];
 }
 
+function normalizeTvaCatalog(raw: any, fallbackRateRaw: any) {
+  const fallbackRate = parseNumeric(fallbackRateRaw);
+  const source = Array.isArray(raw) ? raw : [];
+  const normalized = source
+    .map((row: any, i: number) => ({
+      code: String(row?.code || `TVA_${i + 1}`).trim().slice(0, 40).toUpperCase(),
+      label: String(row?.label || '').trim().slice(0, 120),
+      rate: parseNumeric(row?.rate),
+    }))
+    .filter((row: any) => row.code && row.rate >= 0);
+  if (normalized.length > 0) return normalized;
+  return [
+    {
+      code: 'TVA_STD',
+      label: 'TVA standard',
+      rate: fallbackRate >= 0 ? fallbackRate : Number((defaults as any).tvaRate || 19),
+    },
+  ];
+}
+
+function normalizeFiscalCategoryCatalog(raw: any) {
+  const source = Array.isArray(raw) ? raw : [];
+  const normalized = source
+    .map((row: any) => ({
+      articleCategory: String(
+        row?.articleCategory ?? row?.productCategory ?? row?.category ?? '',
+      )
+        .trim()
+        .slice(0, 120),
+      familyCode: String(row?.familyCode ?? row?.code ?? '')
+        .trim()
+        .toUpperCase()
+        .slice(0, 32),
+      label: String(row?.label ?? '').trim().slice(0, 120),
+    }))
+    .filter((row: any) => row.articleCategory.length > 0 && row.familyCode.length > 0);
+  const unique = new Map<string, { articleCategory: string; familyCode: string; label?: string }>();
+  for (const row of normalized) unique.set(row.articleCategory, row);
+  return Array.from(unique.values());
+}
+
+function validateFiscalCategoryCatalogOrThrow(raw: any) {
+  const source = Array.isArray(raw) ? raw : [];
+  const out: Array<{ articleCategory: string; familyCode: string; label?: string }> = [];
+  const seenArticleCategories = new Set<string>();
+  for (let i = 0; i < source.length; i += 1) {
+    const row = source[i] || {};
+    const articleCategory = String(
+      row?.articleCategory ?? row?.productCategory ?? row?.category ?? '',
+    )
+      .trim()
+      .slice(0, 120);
+    const familyCode = String(row?.familyCode ?? row?.code ?? '')
+      .trim()
+      .toUpperCase()
+      .slice(0, 32);
+    const label = String(row?.label ?? '').trim().slice(0, 120);
+    const isEmpty = articleCategory.length === 0 && familyCode.length === 0;
+    if (isEmpty) continue;
+    if (!articleCategory) {
+      throw new Error(`Catalogue fiscal invalide: ligne ${i + 1}, catégorie article requise.`);
+    }
+    if (!familyCode) {
+      throw new Error(`Catalogue fiscal invalide: ligne ${i + 1}, code famille requis.`);
+    }
+    if (!/^[A-Z0-9_]{2,32}$/.test(familyCode)) {
+      throw new Error(
+        `Catalogue fiscal invalide: ligne ${i + 1}, code famille "${familyCode}" invalide (A-Z0-9_, 2-32).`,
+      );
+    }
+    if (seenArticleCategories.has(articleCategory)) {
+      throw new Error(
+        `Catalogue fiscal invalide: catégorie article dupliquée "${articleCategory}".`,
+      );
+    }
+    seenArticleCategories.add(articleCategory);
+    out.push({ articleCategory, familyCode, label });
+  }
+  return out;
+}
+
 export async function getSettings() {
   const repo = AppDataSource.getRepository(RestaurantSettings);
   const existing = await repo.findOne({ where: {} as any });
@@ -298,6 +484,12 @@ export async function getSettings() {
     (existing as any)?.kitchenBarPrintTemplates ??
       (base as any).kitchenBarPrintTemplates,
   );
+  (base as any).designerPrintTemplates = normalizeDesignerPrintTemplates(
+    (existing as any)?.designerPrintTemplates ?? (base as any)?.designerPrintTemplates,
+  );
+  (base as any).printTemplateSource = normalizePrintTemplateSource(
+    (existing as any)?.printTemplateSource ?? (base as any)?.printTemplateSource,
+  );
   (base as any).receiptPdfDirectory = normalizeReceiptPdfDirectory(
     (existing as any)?.receiptPdfDirectory ?? (base as any).receiptPdfDirectory,
   );
@@ -307,12 +499,22 @@ export async function getSettings() {
   (base as any).predefinedNotes = normalizePredefinedNotes(
     (existing as any)?.predefinedNotes ?? (base as any)?.predefinedNotes,
   );
+  (base as any).tvaCatalog = normalizeTvaCatalog(
+    (existing as any)?.tvaCatalog ?? (base as any)?.tvaCatalog,
+    (base as any)?.tvaRate ?? (defaults as any).tvaRate,
+  );
+  (base as any).fiscalCategoryCatalog = normalizeFiscalCategoryCatalog(
+    (existing as any)?.fiscalCategoryCatalog ?? (base as any)?.fiscalCategoryCatalog,
+  );
   (base as any).clientKdsDisplayMode = normalizeClientKdsDisplayMode(
     (existing as any)?.clientKdsDisplayMode ?? (base as any).clientKdsDisplayMode,
   );
   (base as any).clientKdsWallboardMinWidthPx = normalizeClientKdsWallboardMinWidthPx(
     (existing as any)?.clientKdsWallboardMinWidthPx ??
       (base as any).clientKdsWallboardMinWidthPx,
+  );
+  (base as any).desktopPrintBridge = normalizeDesktopPrintBridge(
+    (existing as any)?.desktopPrintBridge ?? (base as any)?.desktopPrintBridge,
   );
   const pref = normalizeCashClosingModePreference(
     (existing as any)?.cashClosingModePreference ??
@@ -329,13 +531,13 @@ export async function getSettings() {
       String((base as any).companyType || defaults.companyType),
       pref,
     );
-    return { ...base, saasLicense };
+    return { ...maskSensitiveSettings(base), saasLicense };
   } catch {
     (base as any).cashClosingMode = effectiveCashClosingMode(
       String((base as any).companyType || defaults.companyType),
       pref,
     );
-    return base;
+    return maskSensitiveSettings(base);
   }
 }
 
@@ -361,6 +563,40 @@ export async function saveSettings(incomingUpdate: any) {
   const rawProductPrefix = String(update?.productPrefix ?? existing?.productPrefix ?? defaults.productPrefix)
     .trim()
     .slice(0, 20);
+  const existingDesktopBridgeToken = String(
+    (existing as any)?.desktopPrintBridge?.token ??
+      (defaults as any)?.desktopPrintBridge?.token ??
+      '',
+  ).trim();
+  const incomingDesktopBridge = (update as any)?.desktopPrintBridge;
+  const mergedDesktopBridge =
+    incomingDesktopBridge === undefined
+      ? (existing as any)?.desktopPrintBridge ?? (defaults as any)?.desktopPrintBridge
+      : {
+          ...(incomingDesktopBridge || {}),
+          token: mergeSecretTokenInput(
+            incomingDesktopBridge?.token,
+            existingDesktopBridgeToken,
+            '',
+          ),
+        };
+  const existingExternalApiToken = String(
+    (existing as any)?.externalRestaurantCardApi?.token ??
+      (defaults as any)?.externalRestaurantCardApi?.token ??
+      '',
+  ).trim();
+  const incomingExternalApi = (update as any)?.externalRestaurantCardApi;
+  const mergedExternalApi =
+    incomingExternalApi === undefined
+      ? (existing as any)?.externalRestaurantCardApi ?? defaults.externalRestaurantCardApi
+      : {
+          ...(incomingExternalApi || {}),
+          token: mergeSecretTokenInput(
+            incomingExternalApi?.token,
+            existingExternalApiToken,
+            '',
+          ),
+        };
   const data = {
     ...defaults,
     ...(existing || {}),
@@ -372,15 +608,64 @@ export async function saveSettings(incomingUpdate: any) {
     ),
     timbreValue: parseNumeric(update?.timbreValue ?? existing?.timbreValue ?? defaults.timbreValue),
     tvaRate: parseNumeric(update?.tvaRate ?? existing?.tvaRate ?? defaults.tvaRate),
+    tvaCatalog:
+      update?.tvaCatalog !== undefined
+        ? normalizeTvaCatalog(
+            update?.tvaCatalog,
+            update?.tvaRate ?? existing?.tvaRate ?? defaults.tvaRate,
+          )
+        : normalizeTvaCatalog(
+            (existing as any)?.tvaCatalog ?? (defaults as any).tvaCatalog,
+            update?.tvaRate ?? existing?.tvaRate ?? defaults.tvaRate,
+          ),
+    fiscalCategoryCatalog:
+      update?.fiscalCategoryCatalog !== undefined
+        ? validateFiscalCategoryCatalogOrThrow(update?.fiscalCategoryCatalog)
+        : normalizeFiscalCategoryCatalog(
+            (existing as any)?.fiscalCategoryCatalog ?? (defaults as any).fiscalCategoryCatalog,
+          ),
     applyTvaToTicket: update?.applyTvaToTicket ?? existing?.applyTvaToTicket ?? defaults.applyTvaToTicket,
     applyTvaToInvoice: update?.applyTvaToInvoice ?? existing?.applyTvaToInvoice ?? defaults.applyTvaToInvoice,
     applyTimbreToTicket: update?.applyTimbreToTicket ?? existing?.applyTimbreToTicket ?? defaults.applyTimbreToTicket,
     applyTimbreToInvoice: update?.applyTimbreToInvoice ?? existing?.applyTimbreToInvoice ?? defaults.applyTimbreToInvoice,
     printPreviewOnValidate: update?.printPreviewOnValidate ?? existing?.printPreviewOnValidate ?? defaults.printPreviewOnValidate,
+    printAutoOnPreview: update?.printAutoOnPreview ?? existing?.printAutoOnPreview ?? defaults.printAutoOnPreview,
     printRoutingMode: normalizePrintRoutingMode(
       update?.printRoutingMode ??
         (existing as any)?.printRoutingMode ??
         defaults.printRoutingMode,
+    ),
+    nacefEnabled: Boolean(
+      update?.nacefEnabled ??
+        (existing as any)?.nacefEnabled ??
+        (defaults as any)?.nacefEnabled ??
+        false,
+    ),
+    nacefEnforcementMode: normalizeNacefEnforcementMode(
+      update?.nacefEnforcementMode ??
+        (existing as any)?.nacefEnforcementMode ??
+        (defaults as any)?.nacefEnforcementMode ??
+        'SOFT',
+    ),
+    nacefMode: normalizeNacefMode(
+      update?.nacefMode ??
+        (existing as any)?.nacefMode ??
+        (defaults as any)?.nacefMode ??
+        'SIMULATED',
+    ),
+    nacefImdf: normalizeNacefImdf(
+      update?.nacefImdf ??
+        (existing as any)?.nacefImdf ??
+        (defaults as any)?.nacefImdf ??
+        '',
+    ),
+    nacefBaseUrl: normalizeNacefBaseUrl(
+      update?.nacefBaseUrl ??
+        (existing as any)?.nacefBaseUrl ??
+        (defaults as any)?.nacefBaseUrl,
+    ),
+    desktopPrintBridge: normalizeDesktopPrintBridge(
+      mergedDesktopBridge,
     ),
     touchUiMode: update?.touchUiMode ?? existing?.touchUiMode ?? defaults.touchUiMode,
     clientKdsDisplayMode: normalizeClientKdsDisplayMode(
@@ -426,6 +711,16 @@ export async function saveSettings(incomingUpdate: any) {
         (existing as any)?.kitchenBarPrintTemplates ??
         defaults.kitchenBarPrintTemplates,
     ),
+    designerPrintTemplates: normalizeDesignerPrintTemplates(
+      update?.designerPrintTemplates ??
+        (existing as any)?.designerPrintTemplates ??
+        (defaults as any)?.designerPrintTemplates,
+    ),
+    printTemplateSource: normalizePrintTemplateSource(
+      (update as any)?.printTemplateSource ??
+        (existing as any)?.printTemplateSource ??
+        (defaults as any)?.printTemplateSource,
+    ),
     receiptPdfDirectory: normalizeReceiptPdfDirectory(
       update?.receiptPdfDirectory ??
         (existing as any)?.receiptPdfDirectory ??
@@ -458,7 +753,7 @@ export async function saveSettings(incomingUpdate: any) {
           ),
     externalRestaurantCardApi:
       update?.externalRestaurantCardApi !== undefined
-        ? normalizeExternalRestaurantCardApi(update.externalRestaurantCardApi)
+        ? normalizeExternalRestaurantCardApi(mergedExternalApi)
         : normalizeExternalRestaurantCardApi(
             (existing as any)?.externalRestaurantCardApi ??
               defaults.externalRestaurantCardApi,

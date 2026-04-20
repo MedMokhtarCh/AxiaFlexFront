@@ -15,6 +15,17 @@ contextBridge.exposeInMainWorld("appWinApi", {
   openWorkerLog: () => ipcRenderer.invoke("service:open-worker-log"),
   uninstallService: () => ipcRenderer.invoke("service:uninstall"),
   getServiceStatus: () => ipcRenderer.invoke("service:status"),
+  desktopBridgeStartNow: () => ipcRenderer.invoke("desktop-bridge:start-now"),
+  desktopBridgePickInstaller: () => ipcRenderer.invoke("desktop-bridge:pick-installer"),
+  desktopBridgeInstallApp: () => ipcRenderer.invoke("desktop-bridge:install-app"),
+  desktopBridgeInstallAutostart: () =>
+    ipcRenderer.invoke("desktop-bridge:install-autostart"),
+  desktopBridgeUninstallAutostart: () =>
+    ipcRenderer.invoke("desktop-bridge:uninstall-autostart"),
+  desktopBridgeStatus: () => ipcRenderer.invoke("desktop-bridge:status"),
+  desktopBridgeServerStatus: () => ipcRenderer.invoke("desktop-bridge:server-status"),
+  desktopBridgeServerRestart: () => ipcRenderer.invoke("desktop-bridge:server-restart"),
+  desktopBridgeTestHealth: () => ipcRenderer.invoke("desktop-bridge:test-health"),
   onAgentLog: (cb) => ipcRenderer.on("agent-log", (_e, line) => cb(line)),
   onAgentStatus: (cb) => ipcRenderer.on("agent-status", (_e, running) => cb(running)),
 });

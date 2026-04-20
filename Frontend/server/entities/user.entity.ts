@@ -9,16 +9,16 @@ export class User {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ type: 'varchar', length: 160 })
   name: string;
 
   @Column({ type: 'enum', enum: Role, default: Role.SERVER })
   role: Role;
 
-  @Column({ length: 4, unique: true })
+  @Column({ type: 'varchar', length: 4, unique: true })
   pin: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', length: 255, nullable: true })
   avatarUrl: string;
 
   @ManyToMany(() => Zone)

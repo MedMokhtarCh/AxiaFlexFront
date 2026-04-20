@@ -79,6 +79,9 @@ export class PosService {
     if (index === -1) throw new NotFoundException('Commande introuvable');
     
     const currentOrder = this.orders[index];
+    if (currentOrder.fiscalStatus === 'SIGNED') {
+      throw new BadRequestException('Ticket fiscal signe: modification interdite');
+    }
     this.orders[index] = { ...currentOrder, ...updateData };
 
     // Si paiement, mise à jour de la session
@@ -90,6 +93,37 @@ export class PosService {
     }
 
     return this.orders[index];
+  }
+
+  getOrderById(id: string) {
+    return this.orders.find((order) => order.id === id) || null;
+  }
+
+  markOrderAsFiscalSigned(id: string) {
+    const order = this.getOrderById(id);
+    if (!order) throw new NotFoundException('Commande introuvable');
+    order.fiscalStatus = 'SIGNED';
+    order.fiscalMode = 'ONLINE';
+    order.fiscalErrorCode = null;
+    return order;
+  }
+
+  markOrderAsFiscalAcked(id: string) {
+    const order = this.getOrderById(id);
+    if (!order) throw new NotFoundException('Commande introuvable');
+    order.fiscalStatus = 'SIGNED';
+    order.fiscalMode = 'ONLINE';
+    order.fiscalErrorCode = null;
+    return order;
+  }
+
+  markOrderAsFiscalRejected(id: string, errorCode: string) {
+    const order = this.getOrderById(id);
+    if (!order) throw new NotFoundException('Commande introuvable');
+    order.fiscalStatus = 'REJECTED';
+    order.fiscalMode = 'OFFLINE';
+    order.fiscalErrorCode = errorCode;
+    return order;
   }
 
   // --- Session Management ---
