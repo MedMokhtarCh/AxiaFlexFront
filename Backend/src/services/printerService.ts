@@ -497,6 +497,15 @@ const buildClientTemplateData = (
   amount?: number,
 ) => {
   const logoSrc = resolveLogoSource(settings);
+  const nacefPayload = parseFiscalPayloadJson(ticket);
+  const tx = nacefPayload?.transaction || {};
+  const op = tx?.operation || {};
+  const merchant = nacefPayload?.merchant_identity || {};
+  const estab = merchant?.taxpayer_establishment || {};
+  const saleDetails = Array.isArray(nacefPayload?.sale_details) ? nacefPayload.sale_details : [];
+  const paymentRows = Array.isArray(nacefPayload?.payment_details?.collection_details)
+    ? nacefPayload.payment_details.collection_details
+    : [];
   return {
   restaurantName: String((settings as any)?.restaurantName || ''),
   headerText: String((settings as any)?.clientTicketLayout?.headerText || ''),
@@ -528,10 +537,40 @@ const buildClientTemplateData = (
   currency: String((settings as any)?.currency || 'DT'),
   logoSrc,
   logoUrl: logoSrc,
+  fiscalStatus: String((ticket as any)?.fiscalStatus || 'PENDING'),
+  fiscalMode: String((ticket as any)?.fiscalMode || ''),
+  fiscalImdf: String((ticket as any)?.fiscalImdf || tx?.originator?.imdf || ''),
+  fiscalErrorCode: String((ticket as any)?.fiscalErrorCode || ''),
+  fiscalQrPayload: String((ticket as any)?.fiscalQrPayload || ''),
+  nacefVersion: String(nacefPayload?.version || ''),
+  nacefTransactionId: String(tx?.id || ''),
+  nacefTimestamp: String(tx?.timestamp || ''),
+  nacefOperationType: String(op?.op_type || ''),
+  nacefOperationContext: String(op?.context || ''),
+  nacefMf: String(merchant?.id || ''),
+  nacefMerchantName: String(estab?.commercial_name || ''),
+  nacefSaleDetails: saleDetails.map((row: any) => {
+    const qty = Number(row?.quantity || 0);
+    const name = String(row?.product?.name || 'Article');
+    const unit = Number(row?.product?.price_pre_tax || 0) / 1000;
+    const total = qty * unit;
+    return {
+      quantity: qty,
+      name,
+      unitPrice: unit.toFixed(3),
+      total: total.toFixed(3),
+    };
+  }),
+  nacefPaymentDetails: paymentRows.map((row: any) => ({
+    method: String(row?.method || '-'),
+    amount: (Number(row?.amount || 0) / 1000).toFixed(3),
+  })),
+  nacefTotalHt: Number(getPayloadHtTotal(nacefPayload || {})).toFixed(3),
+  nacefTotalTva: Number(getPayloadTaxTotal(nacefPayload || {})).toFixed(3),
+  nacefTotalTtc: Number(getPayloadSaleTotal(nacefPayload || {})).toFixed(3),
   nacefJson: (() => {
     try {
-      const payload = parseFiscalPayloadJson(ticket);
-      return payload ? JSON.stringify(payload, null, 2) : '';
+      return nacefPayload ? JSON.stringify(nacefPayload, null, 2) : '';
     } catch {
       return '';
     }

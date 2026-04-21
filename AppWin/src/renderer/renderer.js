@@ -51,6 +51,8 @@ const els = {
   tplClearClientDefaultBtn: byId("tplClearClientDefaultBtn"),
   tplClearKitchenBtn: byId("tplClearKitchenBtn"),
   tplClearBarBtn: byId("tplClearBarBtn"),
+  logoImportBtn: byId("logoImportBtn"),
+  logoClearBtn: byId("logoClearBtn"),
   templatesStatus: byId("templatesStatus"),
   refreshPrintersBtn: byId("refreshPrintersBtn"),
   printersSelect: byId("printersSelect"),
@@ -177,6 +179,11 @@ async function refreshTemplatesStatus() {
         ? `${k}: OK (${Number(s.size || 0)} bytes) - ${String(s.updatedAt || "")}`
         : `${k}: non défini`;
     })
+    .concat([
+      (slots.__logo && slots.__logo.exists)
+        ? `logo: OK (${Number(slots.__logo.size || 0)} bytes) - ${String(slots.__logo.updatedAt || "")}`
+        : "logo: non défini",
+    ])
     .join("\n");
 }
 
@@ -456,6 +463,16 @@ els.tplClearKitchenBtn.addEventListener("click", async () => {
 els.tplClearBarBtn.addEventListener("click", async () => {
   const res = await appWinApi.clearTemplate("bar");
   appendLog(res?.ok ? "Template bar supprimé." : `Suppression KO: ${res?.error || "inconnue"}`);
+  await refreshTemplatesStatus();
+});
+els.logoImportBtn.addEventListener("click", async () => {
+  const res = await appWinApi.importLogo();
+  appendLog(res?.ok ? "Logo importé pour impression cloud." : `Import logo KO: ${res?.error || "annulé"}`);
+  await refreshTemplatesStatus();
+});
+els.logoClearBtn.addEventListener("click", async () => {
+  const res = await appWinApi.clearLogo();
+  appendLog(res?.ok ? "Logo supprimé." : `Suppression logo KO: ${res?.error || "inconnue"}`);
   await refreshTemplatesStatus();
 });
 

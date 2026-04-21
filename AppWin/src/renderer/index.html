@@ -134,6 +134,7 @@
       <section class="card">
         <h2>Templates cloud locaux</h2>
         <p class="muted">Mode local inchangé. Ces templates ne s'appliquent qu'aux jobs cloud AxiaPrinters.</p>
+        <p class="muted">Vous pouvez importer des templates HTML ou JSON (avec clé <code>html</code>).</p>
         <div class="actions">
           <button id="tplRefreshBtn">Rafraîchir templates</button>
           <button id="tplImportClientNacefBtn">Importer client NACEF</button>
@@ -146,6 +147,10 @@
           <button id="tplClearClientDefaultBtn" class="danger">Supprimer client défaut</button>
           <button id="tplClearKitchenBtn" class="danger">Supprimer cuisine</button>
           <button id="tplClearBarBtn" class="danger">Supprimer bar</button>
+        </div>
+        <div class="actions">
+          <button id="logoImportBtn">Importer logo impression</button>
+          <button id="logoClearBtn" class="danger">Supprimer logo</button>
         </div>
         <pre id="templatesStatus" class="muted"></pre>
       </section>

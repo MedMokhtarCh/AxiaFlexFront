@@ -119,6 +119,10 @@ function getTemplatesDir() {
   return path.join(process.env.LOCALAPPDATA || app.getPath("userData"), APP_BRAND, AGENT_HOME_DIR, "templates");
 }
 
+function getLogoPath() {
+  return path.join(getTemplatesDir(), "logo.png");
+}
+
 function getDefaultConfig() {
   return {
     cloudApiUrl: "https://axiaflex-backend.onrender.com",
@@ -1025,13 +1029,33 @@ app.whenReady().then(() => {
       fs.mkdirSync(dir, { recursive: true });
       const entries = {};
       for (const slot of TEMPLATE_SLOTS) {
-        const p = path.join(dir, `${slot}.html`);
+        const pHtml = path.join(dir, `${slot}.html`);
+        const pJson = path.join(dir, `${slot}.json`);
+        const p = fs.existsSync(pJson) ? pJson : pHtml;
         if (fs.existsSync(p)) {
           const st = fs.statSync(p);
-          entries[slot] = { exists: true, path: p, updatedAt: st.mtime.toISOString(), size: Number(st.size || 0) };
+          entries[slot] = {
+            exists: true,
+            path: p,
+            format: p.toLowerCase().endsWith(".json") ? "json" : "html",
+            updatedAt: st.mtime.toISOString(),
+            size: Number(st.size || 0),
+          };
         } else {
           entries[slot] = { exists: false };
         }
+      }
+      const logoPath = getLogoPath();
+      if (fs.existsSync(logoPath)) {
+        const st = fs.statSync(logoPath);
+        entries.__logo = {
+          exists: true,
+          path: logoPath,
+          updatedAt: st.mtime.toISOString(),
+          size: Number(st.size || 0),
+        };
+      } else {
+        entries.__logo = { exists: false };
       }
       return { ok: true, slots: entries };
     } catch (e) {
@@ -1049,7 +1073,7 @@ app.whenReady().then(() => {
         title: `Importer template ${safeSlot}`,
         properties: ["openFile"],
         filters: [
-          { name: "Templates HTML", extensions: ["html", "htm"] },
+          { name: "Templates (HTML/JSON)", extensions: ["html", "htm", "json"] },
           { name: "Tous les fichiers", extensions: ["*"] },
         ],
       });
@@ -1057,9 +1081,23 @@ app.whenReady().then(() => {
       const src = String(picked.filePaths[0] || "");
       const dir = getTemplatesDir();
       fs.mkdirSync(dir, { recursive: true });
-      const dst = path.join(dir, `${safeSlot}.html`);
+      const srcExt = String(path.extname(src || "") || "").toLowerCase();
+      const dstExt = srcExt === ".json" ? ".json" : ".html";
+      const dst = path.join(dir, `${safeSlot}${dstExt}`);
+      const oldHtml = path.join(dir, `${safeSlot}.html`);
+      const oldJson = path.join(dir, `${safeSlot}.json`);
+      if (oldHtml !== dst) {
+        try {
+          fs.unlinkSync(oldHtml);
+        } catch {}
+      }
+      if (oldJson !== dst) {
+        try {
+          fs.unlinkSync(oldJson);
+        } catch {}
+      }
       fs.copyFileSync(src, dst);
-      return { ok: true, slot: safeSlot, path: dst };
+      return { ok: true, slot: safeSlot, path: dst, format: dstExt === ".json" ? "json" : "html" };
     } catch (e) {
       return { ok: false, error: String(e?.message || e) };
     }
@@ -1070,11 +1108,49 @@ app.whenReady().then(() => {
       if (!TEMPLATE_SLOTS.includes(safeSlot)) {
         return { ok: false, error: "Slot template invalide." };
       }
-      const p = path.join(getTemplatesDir(), `${safeSlot}.html`);
+      const pHtml = path.join(getTemplatesDir(), `${safeSlot}.html`);
+      const pJson = path.join(getTemplatesDir(), `${safeSlot}.json`);
+      try {
+        fs.unlinkSync(pHtml);
+      } catch {}
+      try {
+        fs.unlinkSync(pJson);
+      } catch {}
+      return { ok: true, slot: safeSlot };
+    } catch (e) {
+      return { ok: false, error: String(e?.message || e) };
+    }
+  });
+  ipcMain.handle("logo:import", async () => {
+    try {
+      const win = BrowserWindow.getFocusedWindow() || mainWindow;
+      const picked = await dialog.showOpenDialog(win, {
+        title: "Importer logo impression",
+        properties: ["openFile"],
+        filters: [
+          { name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] },
+          { name: "Tous les fichiers", extensions: ["*"] },
+        ],
+      });
+      if (picked.canceled || !picked.filePaths?.length) return { ok: false, canceled: true };
+      const src = String(picked.filePaths[0] || "");
+      const dir = getTemplatesDir();
+      fs.mkdirSync(dir, { recursive: true });
+      const dst = getLogoPath();
+      fs.copyFileSync(src, dst);
+      const st = fs.statSync(dst);
+      return { ok: true, path: dst, size: Number(st.size || 0), updatedAt: st.mtime.toISOString() };
+    } catch (e) {
+      return { ok: false, error: String(e?.message || e) };
+    }
+  });
+  ipcMain.handle("logo:clear", async () => {
+    try {
+      const p = getLogoPath();
       try {
         fs.unlinkSync(p);
       } catch {}
-      return { ok: true, slot: safeSlot };
+      return { ok: true };
     } catch (e) {
       return { ok: false, error: String(e?.message || e) };
     }

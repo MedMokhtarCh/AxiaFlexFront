@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld("appWinApi", {
   listTemplates: () => ipcRenderer.invoke("templates:list"),
   importTemplate: (slot) => ipcRenderer.invoke("templates:import", slot),
   clearTemplate: (slot) => ipcRenderer.invoke("templates:clear", slot),
+  importLogo: () => ipcRenderer.invoke("logo:import"),
+  clearLogo: () => ipcRenderer.invoke("logo:clear"),
   installService: () => ipcRenderer.invoke("service:install"),
   patchService: () => ipcRenderer.invoke("service:patch"),
   restartTask: () => ipcRenderer.invoke("service:restart-task"),

@@ -180,6 +180,8 @@ function pngBufferToEscPosRaster(pngBuffer, options = {}) {
   const bottomMarginRows = Math.max(8, Number(options.bottomMarginRows || 24));
   const topMarginRows = Math.max(0, Number(options.topMarginRows || 4));
   const minRowInkPixels = Math.max(1, Number(options.minRowInkPixels || 6));
+  const sideMarginCols = Math.max(0, Number(options.sideMarginCols || 4));
+  const minColInkPixels = Math.max(1, Number(options.minColInkPixels || 6));
   const png = PNG.sync.read(pngBuffer);
   const srcW = Number(png.width || 0);
   const srcH = Number(png.height || 0);
@@ -191,6 +193,7 @@ function pngBufferToEscPosRaster(pngBuffer, options = {}) {
   const xBytes = Math.ceil(outW / 8);
   const raster = Buffer.alloc(xBytes * outH);
   const rowInkCounts = new Array(outH).fill(0);
+  const colInkCounts = new Array(outW).fill(0);
 
   for (let y = 0; y < outH; y += 1) {
     const srcY = Math.min(srcH - 1, Math.floor((y * srcH) / outH));
@@ -208,6 +211,7 @@ function pngBufferToEscPosRaster(pngBuffer, options = {}) {
         const idx = y * xBytes + (x >> 3);
         raster[idx] |= 0x80 >> (x & 7);
         rowInkCount += 1;
+        colInkCounts[x] += 1;
       }
     }
     rowInkCounts[y] = rowInkCount;
@@ -215,20 +219,44 @@ function pngBufferToEscPosRaster(pngBuffer, options = {}) {
 
   let firstInkY = -1;
   let lastInkY = -1;
+  let firstInkX = -1;
+  let lastInkX = -1;
   for (let y = 0; y < outH; y += 1) {
     if (rowInkCounts[y] >= minRowInkPixels) {
       if (firstInkY < 0) firstInkY = y;
       lastInkY = y;
     }
   }
+  for (let x = 0; x < outW; x += 1) {
+    if (colInkCounts[x] >= minColInkPixels) {
+      if (firstInkX < 0) firstInkX = x;
+      lastInkX = x;
+    }
+  }
   const startRow = Math.max(0, firstInkY >= 0 ? firstInkY - topMarginRows : 0);
+  const startCol = Math.max(0, firstInkX >= 0 ? firstInkX - sideMarginCols : 0);
+  const endCol = Math.min(outW - 1, lastInkX >= 0 ? lastInkX + sideMarginCols : outW - 1);
+  const effectiveCols = Math.max(1, endCol - startCol + 1);
   const effectiveRows = Math.max(
     minContentRows,
     Math.min(outH - startRow, (lastInkY >= 0 ? lastInkY + 1 - startRow : 0) + bottomMarginRows),
   );
-  const rasterTrimmed = raster.subarray(startRow * xBytes, (startRow + effectiveRows) * xBytes);
-  const xL = xBytes & 0xff;
-  const xH = (xBytes >> 8) & 0xff;
+  const trimmedBytesPerRow = Math.ceil(effectiveCols / 8);
+  const rasterTrimmed = Buffer.alloc(trimmedBytesPerRow * effectiveRows);
+  for (let y = 0; y < effectiveRows; y += 1) {
+    const srcY = startRow + y;
+    for (let x = 0; x < effectiveCols; x += 1) {
+      const srcX = startCol + x;
+      const srcByte = raster[srcY * xBytes + (srcX >> 3)] || 0;
+      const isSet = (srcByte & (0x80 >> (srcX & 7))) !== 0;
+      if (isSet) {
+        const dstIdx = y * trimmedBytesPerRow + (x >> 3);
+        rasterTrimmed[dstIdx] |= 0x80 >> (x & 7);
+      }
+    }
+  }
+  const xL = trimmedBytesPerRow & 0xff;
+  const xH = (trimmedBytesPerRow >> 8) & 0xff;
   const yL = effectiveRows & 0xff;
   const yH = (effectiveRows >> 8) & 0xff;
   const header = Buffer.from([0x1b, 0x40, 0x1d, 0x76, 0x30, 0x00, xL, xH, yL, yH]);
@@ -321,9 +349,26 @@ function renderTemplateString(template, data) {
 async function loadLocalTemplate(slot) {
   const safe = String(slot || "").trim().toLowerCase();
   if (!safe) return "";
-  const p = path.join(TEMPLATES_DIR, `${safe}.html`);
   try {
-    return await fs.readFile(p, "utf8");
+    const pJson = path.join(TEMPLATES_DIR, `${safe}.json`);
+    const jsonRaw = await fs.readFile(pJson, "utf8");
+    const parsed = JSON.parse(String(jsonRaw || "{}"));
+    const html = String(parsed?.html || parsed?.template || "").trim();
+    if (html) return html;
+  } catch {}
+  try {
+    const pHtml = path.join(TEMPLATES_DIR, `${safe}.html`);
+    return await fs.readFile(pHtml, "utf8");
+  } catch {}
+  return "";
+}
+
+async function loadLocalLogoDataUri() {
+  const p = path.join(TEMPLATES_DIR, "logo.png");
+  try {
+    const data = await fs.readFile(p);
+    if (!data?.length) return "";
+    return `data:image/png;base64,${data.toString("base64")}`;
   } catch {
     return "";
   }
@@ -461,10 +506,19 @@ async function processJobs(token) {
         const htmlRaw = String(payload.html || payload.renderedHtml || "").trim();
         let finalHtml = htmlRaw || (htmlBase64 ? Buffer.from(htmlBase64, "base64").toString("utf8") : "");
         const templateKind = String(payload.templateKind || "").trim().toLowerCase();
+        const localLogo = await loadLocalLogoDataUri();
+        const templateData = payload.templateData && typeof payload.templateData === "object"
+          ? { ...payload.templateData }
+          : {};
+        if (localLogo) {
+          templateData.logoSrc = localLogo;
+          templateData.logoUrl = localLogo;
+          templateData.logoBase64 = localLogo;
+        }
         if (templateKind) {
           const localTpl = await loadLocalTemplate(templateKind);
           if (localTpl) {
-            finalHtml = renderTemplateString(localTpl, payload.templateData || {});
+            finalHtml = renderTemplateString(localTpl, templateData);
           }
         }
         const effectiveBase64 = finalHtml ? Buffer.from(finalHtml, "utf8").toString("base64") : "";
