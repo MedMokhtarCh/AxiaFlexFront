@@ -5,6 +5,7 @@ const fs = require("node:fs/promises");
 const { pathToFileURL } = require("node:url");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
+const { PNG } = require("pngjs");
 
 const execFileAsync = promisify(execFile);
 const API_BASE = String(process.env.CLOUD_API_URL || "").replace(/\/$/, "");
@@ -106,18 +107,157 @@ async function printRawText(printerName, text) {
   const tmp = path.join(os.tmpdir(), `axiaprinters-print-${Date.now()}.txt`);
   await fs.writeFile(tmp, String(text || ""), "utf8");
   try {
-    const escapedPath = String(tmp).replace(/'/g, "''");
-    const escapedPrinter = String(printerName || "").replace(/'/g, "''");
-    await execFileAsync("powershell", [
-      "-NoProfile",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-Command",
-      `$path='${escapedPath}'; $printer='${escapedPrinter}'; Get-Content -LiteralPath $path | Out-Printer -Name $printer`,
-    ]);
+    await printRawFile(printerName, tmp, "AxiaPrinters RAW_TEXT");
   } finally {
     await fs.unlink(tmp).catch(() => undefined);
   }
+}
+
+async function printRawFile(printerName, filePath, docName = "AxiaPrinters RAW") {
+  const escapedPath = String(filePath || "").replace(/'/g, "''");
+  const escapedPrinter = String(printerName || "").replace(/'/g, "''");
+  const escapedDoc = String(docName || "AxiaPrinters RAW").replace(/'/g, "''");
+  const csharpRaw = [
+    "using System;",
+    "using System.Runtime.InteropServices;",
+    "public static class RawPrinterHelper {",
+    " [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]",
+    " public class DOC_INFO_1 {",
+    "  [MarshalAs(UnmanagedType.LPWStr)] public string pDocName;",
+    "  [MarshalAs(UnmanagedType.LPWStr)] public string pOutputFile;",
+    "  [MarshalAs(UnmanagedType.LPWStr)] public string pDataType;",
+    " }",
+    " [DllImport(\"winspool.Drv\", EntryPoint=\"OpenPrinterW\", SetLastError=true, CharSet=CharSet.Unicode)] public static extern bool OpenPrinter(string pPrinterName, out IntPtr phPrinter, IntPtr pDefault);",
+    " [DllImport(\"winspool.Drv\", SetLastError=true)] public static extern bool ClosePrinter(IntPtr hPrinter);",
+    " [DllImport(\"winspool.Drv\", EntryPoint=\"StartDocPrinterW\", SetLastError=true, CharSet=CharSet.Unicode)] public static extern bool StartDocPrinter(IntPtr hPrinter, int level, [In] DOC_INFO_1 di);",
+    " [DllImport(\"winspool.Drv\", SetLastError=true)] public static extern bool EndDocPrinter(IntPtr hPrinter);",
+    " [DllImport(\"winspool.Drv\", SetLastError=true)] public static extern bool StartPagePrinter(IntPtr hPrinter);",
+    " [DllImport(\"winspool.Drv\", SetLastError=true)] public static extern bool EndPagePrinter(IntPtr hPrinter);",
+    " [DllImport(\"winspool.Drv\", SetLastError=true)] public static extern bool WritePrinter(IntPtr hPrinter, byte[] pBytes, int dwCount, out int dwWritten);",
+    "}",
+  ].join(" ").replace(/'/g, "''");
+  const psRaw = [
+    "$ErrorActionPreference='Stop'",
+    `$cs='${csharpRaw}'`,
+    "Add-Type -TypeDefinition $cs",
+    `$printer='${escapedPrinter}'`,
+    `$path='${escapedPath}'`,
+    `$doc='${escapedDoc}'`,
+    "$bytes=[System.IO.File]::ReadAllBytes($path)",
+    "if (-not $bytes -or $bytes.Length -le 0) { throw 'RAW payload vide' }",
+    "$h=[IntPtr]::Zero",
+    "if (-not [RawPrinterHelper]::OpenPrinter($printer, [ref]$h, [IntPtr]::Zero)) { throw ('OpenPrinter failed: ' + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) }",
+    "try {",
+    "  $di = New-Object RawPrinterHelper+DOC_INFO_1",
+    "  $di.pDocName = $doc",
+    "  $di.pDataType = 'RAW'",
+    "  if (-not [RawPrinterHelper]::StartDocPrinter($h, 1, $di)) { throw ('StartDocPrinter failed: ' + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) }",
+    "  try {",
+    "    if (-not [RawPrinterHelper]::StartPagePrinter($h)) { throw ('StartPagePrinter failed: ' + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) }",
+    "    try {",
+    "      $written = 0",
+    "      if (-not [RawPrinterHelper]::WritePrinter($h, $bytes, $bytes.Length, [ref]$written)) { throw ('WritePrinter failed: ' + [Runtime.InteropServices.Marshal]::GetLastWin32Error()) }",
+    "      if ($written -lt $bytes.Length) { throw ('WritePrinter short write: ' + $written + '/' + $bytes.Length) }",
+    "    } finally { [void][RawPrinterHelper]::EndPagePrinter($h) }",
+    "  } finally { [void][RawPrinterHelper]::EndDocPrinter($h) }",
+    "} finally { [void][RawPrinterHelper]::ClosePrinter($h) }",
+  ].join("; ");
+  await execFileAsync("powershell", [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    psRaw,
+  ]);
+}
+
+function pngBufferToEscPosRaster(pngBuffer, options = {}) {
+  const maxWidth = Math.max(384, Number(options.maxWidth || 576));
+  const maxHeight = Math.max(400, Number(options.maxHeight || 2400));
+  const threshold = Number(options.threshold || 170);
+  const png = PNG.sync.read(pngBuffer);
+  const srcW = Number(png.width || 0);
+  const srcH = Number(png.height || 0);
+  if (!srcW || !srcH) throw new Error("Image PNG invalide");
+
+  const scale = Math.min(1, maxWidth / srcW);
+  const outW = Math.max(1, Math.floor(srcW * scale));
+  const outH = Math.max(1, Math.min(maxHeight, Math.floor(srcH * scale)));
+  const xBytes = Math.ceil(outW / 8);
+  const raster = Buffer.alloc(xBytes * outH);
+
+  for (let y = 0; y < outH; y += 1) {
+    const srcY = Math.min(srcH - 1, Math.floor((y * srcH) / outH));
+    for (let x = 0; x < outW; x += 1) {
+      const srcX = Math.min(srcW - 1, Math.floor((x * srcW) / outW));
+      const i = (srcY * srcW + srcX) * 4;
+      const r = png.data[i] || 0;
+      const g = png.data[i + 1] || 0;
+      const b = png.data[i + 2] || 0;
+      const a = png.data[i + 3] == null ? 255 : png.data[i + 3];
+      const lum = (0.299 * r) + (0.587 * g) + (0.114 * b);
+      const isBlack = a > 8 && lum < threshold;
+      if (isBlack) {
+        const idx = y * xBytes + (x >> 3);
+        raster[idx] |= 0x80 >> (x & 7);
+      }
+    }
+  }
+
+  const xL = xBytes & 0xff;
+  const xH = (xBytes >> 8) & 0xff;
+  const yL = outH & 0xff;
+  const yH = (outH >> 8) & 0xff;
+  const header = Buffer.from([0x1b, 0x40, 0x1d, 0x76, 0x30, 0x00, xL, xH, yL, yH]);
+  const footer = Buffer.from([0x0a, 0x0a, 0x0a, 0x1d, 0x56, 0x41, 0x10]);
+  return Buffer.concat([header, raster, footer]);
+}
+
+async function printHtmlAsEscPosImage(printerName, browserPath, htmlPath) {
+  const tmpPng = path.join(os.tmpdir(), `axiaprinters-print-${Date.now()}.png`);
+  try {
+    const url = pathToFileURL(htmlPath).toString();
+    await execFileAsync(browserPath, [
+      "--headless",
+      "--disable-gpu",
+      "--hide-scrollbars",
+      "--window-size=576,2200",
+      `--screenshot=${tmpPng}`,
+      url,
+    ]);
+    const pngBuffer = await fs.readFile(tmpPng);
+    const escpos = pngBufferToEscPosRaster(pngBuffer, {
+      maxWidth: 576,
+      maxHeight: 2400,
+      threshold: 170,
+    });
+    const tmpRaw = path.join(os.tmpdir(), `axiaprinters-escpos-${Date.now()}.bin`);
+    await fs.writeFile(tmpRaw, escpos);
+    try {
+      await printRawFile(printerName, tmpRaw, "AxiaPrinters HTML->ESC/POS");
+    } finally {
+      await fs.unlink(tmpRaw).catch(() => undefined);
+    }
+  } finally {
+    await fs.unlink(tmpPng).catch(() => undefined);
+  }
+}
+
+function htmlToPlainText(rawHtml) {
+  return String(rawHtml || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\r/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 async function printPdfBase64(printerName, pdfBase64) {
@@ -160,15 +300,28 @@ async function printHtmlBase64(printerName, htmlBase64) {
         break;
       } catch {}
     }
-    if (!browserPath) throw new Error("No Edge/Chrome found for HTML rendering");
-    const url = pathToFileURL(tmpHtml).toString();
-    await execFileAsync(browserPath, [
-      "--headless",
-      "--disable-gpu",
-      `--print-to-pdf=${tmpPdf}`,
-      url,
-    ]);
-    await printPdfFile(printerName, tmpPdf);
+    if (!browserPath) {
+      const htmlRaw = Buffer.from(String(htmlBase64 || ""), "base64").toString("utf8");
+      await printRawText(printerName, htmlToPlainText(htmlRaw) || "[HTML_PRINT fallback texte vide]");
+      return;
+    }
+    try {
+      await printHtmlAsEscPosImage(printerName, browserPath, tmpHtml);
+    } catch {
+      const url = pathToFileURL(tmpHtml).toString();
+      await execFileAsync(browserPath, [
+        "--headless",
+        "--disable-gpu",
+        `--print-to-pdf=${tmpPdf}`,
+        url,
+      ]);
+      try {
+        await printPdfFile(printerName, tmpPdf);
+      } catch {
+        const htmlRaw = Buffer.from(String(htmlBase64 || ""), "base64").toString("utf8");
+        await printRawText(printerName, htmlToPlainText(htmlRaw) || "[HTML_PRINT fallback texte vide]");
+      }
+    }
   } finally {
     await fs.unlink(tmpHtml).catch(() => undefined);
     await fs.unlink(tmpPdf).catch(() => undefined);
@@ -192,7 +345,15 @@ async function resolvePrinterNameForJob(job, payload) {
     return needle && (needle === localId || needle === portName || needle === name);
   });
   if (byId?.Name) return String(byId.Name).trim();
-  if (targetName) return targetName;
+  if (targetName) {
+    const normalizedTarget = targetName.toLowerCase();
+    const fuzzy = printers.find((p) => String(p?.Name || "").trim().toLowerCase().includes(normalizedTarget));
+    if (fuzzy?.Name) return String(fuzzy.Name).trim();
+    return targetName;
+  }
+  const defaultP = printers.find((p) => String(p?.Default || "").toLowerCase() === "true");
+  if (defaultP?.Name) return String(defaultP.Name).trim();
+  if (printers[0]?.Name) return String(printers[0].Name).trim();
   return "";
 }
 
@@ -209,18 +370,36 @@ async function processJobs(token) {
       const printerName = await resolvePrinterNameForJob(j, payload);
       if (!printerName) throw new Error("Missing printerName");
       const type = String(payload.type || "");
+      console.log(
+        `[axiaprinters-agent] job=${String(j?.id || "?")} type=${type} target=${String(printerName || "?")}`,
+      );
       if (type === "RAW_TEXT_PRINT") {
         await printRawText(printerName, String(payload.text || ""));
+      } else if (type === "RAW_BYTES_PRINT") {
+        const rawBase64 = String(payload.rawBase64 || "").trim();
+        if (!rawBase64) throw new Error("Missing rawBase64");
+        const tmpRaw = path.join(os.tmpdir(), `axiaprinters-raw-${Date.now()}.bin`);
+        await fs.writeFile(tmpRaw, Buffer.from(rawBase64, "base64"));
+        try {
+          await printRawFile(printerName, tmpRaw, "AxiaPrinters RAW_BYTES");
+        } finally {
+          await fs.unlink(tmpRaw).catch(() => undefined);
+        }
       } else if (type === "PDF_PRINT") {
         await printPdfBase64(printerName, String(payload.pdfBase64 || ""));
       } else if (type === "HTML_PRINT") {
-        await printHtmlBase64(printerName, String(payload.htmlBase64 || ""));
+        const htmlBase64 = String(payload.htmlBase64 || "").trim();
+        const htmlRaw = String(payload.html || payload.renderedHtml || "").trim();
+        const effectiveBase64 = htmlBase64 || (htmlRaw ? Buffer.from(htmlRaw, "utf8").toString("base64") : "");
+        if (!effectiveBase64) throw new Error("Missing HTML payload");
+        await printHtmlBase64(printerName, effectiveBase64);
       } else {
         throw new Error("Unsupported job payload type");
       }
     } catch (e) {
       ok = false;
       error = e instanceof Error ? e.message : "print failed";
+      console.error(`[axiaprinters-agent] job=${String(j?.id || "?")} failed: ${String(error || "unknown")}`);
     }
     await cloudFetch(`/pos/agent/jobs/${encodeURIComponent(String(j.id || ""))}/ack`, {
       method: "POST",
@@ -274,6 +453,8 @@ async function loop() {
       console.error("[axiaprinters-agent] cycle error:", msg);
       if (
         msg.toLowerCase().includes("master token invalide") ||
+        msg.toLowerCase().includes("agent token invalide") ||
+        msg.toLowerCase().includes("token invalide") ||
         msg.includes("401") ||
         msg.toLowerCase().includes("unauthorized")
       ) {

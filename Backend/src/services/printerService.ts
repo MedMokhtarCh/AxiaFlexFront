@@ -1912,7 +1912,18 @@ export async function printPaymentReceipt(
   for (let i = 0; i < copies; i += 1) {
     if (isDesktopBridgeMode(settings)) {
       let renderedHtmlForBridge = '';
-      if (clientSource === 'DESIGNER' && designerClientHtml) {
+      const nacefTemplateActive = isNacefPrintTemplateActive(settings);
+      if (nacefTemplateActive) {
+        renderedHtmlForBridge = buildModelReceiptHtml(
+          printTarget,
+          settings,
+          order,
+          ticket,
+          items,
+          effectivePaymentMethod,
+          amount,
+        );
+      } else if (clientSource === 'DESIGNER' && designerClientHtml) {
         try {
           renderedHtmlForBridge = renderExternalClientTemplate(
             String(designerClientHtml || ''),
@@ -1928,6 +1939,16 @@ export async function printPaymentReceipt(
         } catch {
           renderedHtmlForBridge = '';
         }
+      } else {
+        renderedHtmlForBridge = buildModelReceiptHtml(
+          printTarget,
+          settings,
+          order,
+          ticket,
+          items,
+          effectivePaymentMethod,
+          amount,
+        );
       }
       const bridgePayload = {
         kind: 'client',
@@ -2129,7 +2150,18 @@ export async function  printProvisionalClientReceipt(orderId: string) {
   const clientSource = getPrintTemplateSource(settings, 'client');
   if (isDesktopBridgeMode(settings)) {
     let renderedHtmlForBridge = '';
-    if (clientSource === 'DESIGNER' && designerClientHtml) {
+    const nacefTemplateActive = isNacefPrintTemplateActive(settings);
+    if (nacefTemplateActive) {
+      renderedHtmlForBridge = buildModelReceiptHtml(
+        printTarget,
+        settings,
+        order,
+        fakeTicket,
+        fakeItems,
+        paymentMethod,
+        undefined,
+      );
+    } else if (clientSource === 'DESIGNER' && designerClientHtml) {
       try {
         renderedHtmlForBridge = renderExternalClientTemplate(
           String(designerClientHtml || ''),
@@ -2138,6 +2170,16 @@ export async function  printProvisionalClientReceipt(orderId: string) {
       } catch {
         renderedHtmlForBridge = '';
       }
+    } else {
+      renderedHtmlForBridge = buildModelReceiptHtml(
+        printTarget,
+        settings,
+        order,
+        fakeTicket,
+        fakeItems,
+        paymentMethod,
+        undefined,
+      );
     }
     await postDesktopBridgeJob(settings, {
       kind: 'client',

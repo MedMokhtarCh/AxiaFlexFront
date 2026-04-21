@@ -9,7 +9,11 @@
     "dist:win": "electron-builder --win nsis",
     "dist:win:safe": "powershell -NoProfile -ExecutionPolicy Bypass -File ./build-win-safe.ps1"
   },
-  "keywords": ["electron", "axiaflex", "print-agent"],
+  "keywords": [
+    "electron",
+    "axiaflex",
+    "print-agent"
+  ],
   "author": "AxiaPrinters",
   "license": "MIT",
   "type": "commonjs",
@@ -45,5 +49,8 @@
     "nsis": {
       "include": "build/installer.nsh"
     }
+  },
+  "dependencies": {
+    "pngjs": "^7.0.0"
   }
 }

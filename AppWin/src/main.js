@@ -1,9 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const http = require("node:http");
 const { pathToFileURL } = require("node:url");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const os = require("node:os");
 
 let mainWindow = null;
@@ -118,6 +118,7 @@ function getDefaultConfig() {
   return {
     cloudApiUrl: "https://axiaflex-backend.onrender.com",
     agentMasterToken: "",
+    nodeExePath: "",
     terminalAlias: "TERMINAL-1",
     siteName: "SITE-A",
     pollMs: 3000,
@@ -184,26 +185,92 @@ function resolvePsScript(name) {
   return findFirstExistingPath(candidates);
 }
 
-function resolveNodeExe() {
-  const candidates = [];
-  if (!app.isPackaged && process.execPath) {
-    candidates.push(process.execPath);
+function resolveNodeExe(config = {}) {
+  const manual = String(config?.nodeExePath || "").trim();
+  if (manual) {
+    const manualCandidates = [manual];
+    if (/nodejs$/i.test(manual)) {
+      manualCandidates.push(path.join(manual, "node.exe"));
+    }
+    if (/Program Files/i.test(manual)) {
+      manualCandidates.push(manual.replace(/Program Files/gi, "Programmes"));
+    }
+    if (/Programmes/i.test(manual)) {
+      manualCandidates.push(manual.replace(/Programmes/gi, "Program Files"));
+    }
+    try {
+      for (const p of manualCandidates) {
+        if (p && fs.existsSync(p)) return { exe: p, runAsNode: false };
+      }
+    } catch {}
   }
+
+  const candidates = [];
+  candidates.push("C:\\Programmes\\nodejs\\node.exe");
+  candidates.push("C:\\Programmes (x86)\\nodejs\\node.exe");
   if (process.env.ProgramFiles) {
     candidates.push(path.join(process.env.ProgramFiles, "nodejs", "node.exe"));
   }
   if (process.env["ProgramFiles(x86)"]) {
     candidates.push(path.join(process.env["ProgramFiles(x86)"], "nodejs", "node.exe"));
   }
-  candidates.push("node.exe");
-  candidates.push("node");
-  return candidates.find((p) => {
+  if (process.env.LOCALAPPDATA) {
+    candidates.push(path.join(process.env.LOCALAPPDATA, "Programs", "nodejs", "node.exe"));
+  }
+  if (process.env.NVM_SYMLINK) {
+    candidates.push(path.join(process.env.NVM_SYMLINK, "node.exe"));
+  }
+
+  for (const p of candidates) {
     try {
-      return Boolean(p) && (p === "node" || p === "node.exe" || fs.existsSync(p));
-    } catch {
-      return false;
+      if (p && fs.existsSync(p)) return { exe: p, runAsNode: false };
+    } catch {}
+  }
+
+  // Check PATH directories explicitly.
+  try {
+    const parts = String(process.env.PATH || "")
+      .split(";")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const dir of parts) {
+      const p = path.join(dir, "node.exe");
+      try {
+        if (fs.existsSync(p)) return { exe: p, runAsNode: false };
+      } catch {}
     }
-  });
+  } catch {}
+
+  // Try Node install path from registry.
+  try {
+    const reg64 = spawnSync("reg.exe", ["query", "HKLM\\SOFTWARE\\Node.js", "/v", "InstallPath"], {
+      windowsHide: true,
+      encoding: "utf8",
+    });
+    if (reg64.status === 0) {
+      const m = String(reg64.stdout || "").match(/InstallPath\s+REG_\w+\s+([^\r\n]+)/i);
+      const installPath = m ? String(m[1] || "").trim() : "";
+      const p = installPath ? path.join(installPath, "node.exe") : "";
+      if (p && fs.existsSync(p)) return { exe: p, runAsNode: false };
+    }
+  } catch {}
+
+  // Detect Node from PATH only if really resolvable.
+  try {
+    const whereRes = spawnSync("where.exe", ["node"], {
+      windowsHide: true,
+      encoding: "utf8",
+    });
+    if (whereRes.status === 0) {
+      const first = String(whereRes.stdout || "")
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .find(Boolean);
+      if (first && fs.existsSync(first)) return { exe: first, runAsNode: false };
+    }
+  } catch {}
+
+  return null;
 }
 
 /** PowerShell 64 bits explicite (évite SysWOW64 si Electron est 32 bits). */
@@ -731,19 +798,68 @@ function startAgent(config) {
     AGENT_POLL_MS: String(Math.max(1500, Number(config.pollMs) || 3000)),
   };
 
-  const nodeExe = resolveNodeExe();
-  if (!nodeExe) {
-    return { ok: false, error: "Node.js introuvable. Installez Node LTS puis relancez." };
+  let nodeRuntime = resolveNodeExe(config || {});
+  const scriptInAsar = /\.asar([\\/]|$)/i.test(String(agentScriptPath || ""));
+  if (scriptInAsar) {
+    // External node.exe cannot execute entrypoints located inside app.asar.
+    // Force Electron runtime in Node mode for packaged app script.
+    try {
+      if (process.execPath && fs.existsSync(process.execPath)) {
+        nodeRuntime = { exe: process.execPath, runAsNode: true };
+      }
+    } catch {}
   }
-  pushLog(`Lancement agent via: ${nodeExe}`);
+  if (!nodeRuntime?.exe) {
+    return { ok: false, error: "Node.js/Electron runtime introuvable. Relancez AxiaPrinters." };
+  }
   try {
-    agentProcess = spawn(nodeExe, [agentScriptPath], {
-      cwd: path.dirname(agentScriptPath),
-      env,
+    if (!fs.existsSync(nodeRuntime.exe)) {
+      return {
+        ok: false,
+        error: `Node.js introuvable au chemin: ${nodeRuntime.exe}. Renseignez le chemin exact vers node.exe.`,
+      };
+    }
+  } catch {
+    return {
+      ok: false,
+      error: `Chemin Node.js invalide: ${String(nodeRuntime.exe || "")}`,
+    };
+  }
+  pushLog(`Lancement agent via: ${nodeRuntime.exe}${nodeRuntime.runAsNode ? " (electron-node)" : ""}`);
+  const safeCwd = (() => {
+    const scriptDir = path.dirname(agentScriptPath);
+    // Never use an ASAR virtual path as cwd for child processes.
+    if (/\.asar([\\/]|$)/i.test(scriptDir)) {
+      try {
+        return path.dirname(process.execPath || scriptDir);
+      } catch {
+        return process.cwd();
+      }
+    }
+    return scriptDir;
+  })();
+  try {
+    agentProcess = spawn(nodeRuntime.exe, [agentScriptPath], {
+      cwd: safeCwd,
+      env: nodeRuntime.runAsNode
+        ? { ...env, ELECTRON_RUN_AS_NODE: "1" }
+        : env,
       windowsHide: true,
     });
   } catch (e) {
-    return { ok: false, error: `Echec démarrage agent: ${String(e?.message || e)}` };
+    // Fallback via cmd to tolerate edge cases with localized Windows paths.
+    try {
+      const cmd = `"${String(nodeRuntime.exe)}" "${String(agentScriptPath)}"`;
+      agentProcess = spawn("cmd.exe", ["/d", "/s", "/c", cmd], {
+        cwd: safeCwd,
+        env: nodeRuntime.runAsNode
+          ? { ...env, ELECTRON_RUN_AS_NODE: "1" }
+          : env,
+        windowsHide: true,
+      });
+    } catch (e2) {
+      return { ok: false, error: `Echec démarrage agent: ${String(e2?.message || e2)}` };
+    }
   }
 
   pushLog("Agent démarré.");
@@ -790,6 +906,31 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+  const appMenu = Menu.buildFromTemplate([
+    {
+      label: "Edition",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" },
+      ],
+    },
+  ]);
+  Menu.setApplicationMenu(appMenu);
+  mainWindow.webContents.on("context-menu", () => {
+    const ctx = Menu.buildFromTemplate([
+      { role: "cut", label: "Couper" },
+      { role: "copy", label: "Copier" },
+      { role: "paste", label: "Coller" },
+      { type: "separator" },
+      { role: "selectAll", label: "Tout selectionner" },
+    ]);
+    ctx.popup({ window: mainWindow });
   });
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
 }

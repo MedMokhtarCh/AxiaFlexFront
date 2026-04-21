@@ -9,6 +9,7 @@ const els = {
   terminalAlias: byId("terminalAlias"),
   siteName: byId("siteName"),
   pollMs: byId("pollMs"),
+  nodeExePath: byId("nodeExePath"),
   bridgeInstallerPath: byId("bridgeInstallerPath"),
   bridgePickInstallerBtn: byId("bridgePickInstallerBtn"),
   bridgeInstallAppBtn: byId("bridgeInstallAppBtn"),
@@ -158,6 +159,7 @@ async function saveConfig() {
     terminalAlias: els.terminalAlias.value.trim(),
     siteName: els.siteName.value.trim(),
     pollMs: Number.parseInt(els.pollMs.value || "3000", 10),
+    nodeExePath: String(els.nodeExePath.value || "").trim(),
     desktopBridge: {
       installerPath: String(els.bridgeInstallerPath.value || "").trim(),
       exePath: String(els.bridgeExePath.value || "").trim(),
@@ -181,6 +183,7 @@ async function init() {
   els.terminalAlias.value = String(cfg.terminalAlias || "TERMINAL-1");
   els.siteName.value = String(cfg.siteName || "SITE-A");
   els.pollMs.value = String(cfg.pollMs || 3000);
+  els.nodeExePath.value = String(cfg.nodeExePath || "");
   const bridge = cfg?.desktopBridge || {};
   els.bridgeInstallerPath.value = String(bridge.installerPath || "");
   els.bridgeExePath.value = String(bridge.exePath || "");
