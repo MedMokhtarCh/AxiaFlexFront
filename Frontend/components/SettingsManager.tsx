@@ -7223,7 +7223,7 @@ const SettingsManager: React.FC = () => {
                       </p>
                       {Array.isArray(t.printers) && t.printers.length > 0 ? (
                         <div className="space-y-1">
-                          {t.printers.slice(0, 4).map((lp) => (
+                          {t.printers.map((lp) => (
                             <p
                               key={lp.id}
                               className="text-[10px] text-slate-500 font-bold truncate"
@@ -7231,11 +7231,6 @@ const SettingsManager: React.FC = () => {
                               • {lp.name} ({lp.transport})
                             </p>
                           ))}
-                          {t.printers.length > 4 ? (
-                            <p className="text-[10px] text-slate-400 font-bold">
-                              +{t.printers.length - 4} autre(s)...
-                            </p>
-                          ) : null}
                         </div>
                       ) : null}
                       <div className="pt-1">
