@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld("appWinApi", {
   syncPrintersNow: () => ipcRenderer.invoke("agent:sync-printers-now"),
   testPrint: (printerName, text) =>
     ipcRenderer.invoke("agent:test-print", printerName, text),
+  listTemplates: () => ipcRenderer.invoke("templates:list"),
+  importTemplate: (slot) => ipcRenderer.invoke("templates:import", slot),
+  clearTemplate: (slot) => ipcRenderer.invoke("templates:clear", slot),
   installService: () => ipcRenderer.invoke("service:install"),
   patchService: () => ipcRenderer.invoke("service:patch"),
   restartTask: () => ipcRenderer.invoke("service:restart-task"),

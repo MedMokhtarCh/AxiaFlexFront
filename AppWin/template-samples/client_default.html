@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    @page { size: 80mm auto; margin: 0; }
+    html, body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+    .wrap { width: 76mm; margin: 0 auto; padding: 2mm 0; color: #111; }
+    .center { text-align: center; }
+    .sep { border-top: 1px dashed #666; margin: 6px 0; }
+    .small { font-size: 10px; }
+    .title { font-size: 15px; font-weight: 700; }
+    .row { display: flex; justify-content: space-between; font-size: 11px; }
+    .bold { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="center title">{{restaurantName}}</div>
+    <div class="center small">{{headerText}}</div>
+    <div class="center small">Ticket {{ticketCode}} - Cmd {{orderNumber}}</div>
+    <div class="center small">{{createdAt}}</div>
+    <div class="sep"></div>
+
+    {{#each items}}
+      <div class="row">
+        <span>{{this.quantity}} x {{this.name}}</span>
+        <span>{{this.total}}</span>
+      </div>
+    {{/each}}
+
+    <div class="sep"></div>
+    <div class="row"><span>Sous-total</span><span>{{subtotal}}</span></div>
+    <div class="row"><span>Remise</span><span>{{discount}}</span></div>
+    <div class="row"><span>Timbre</span><span>{{timbre}}</span></div>
+    <div class="row bold"><span>TOTAL</span><span>{{total}}</span></div>
+    <div class="row"><span>Règlement</span><span>{{amount}}</span></div>
+
+    <div class="sep"></div>
+    <div class="small">Table: {{tableNumber}}</div>
+    <div class="small">Serveur: {{serverName}}</div>
+    <div class="small">Référence: {{orderRef}}</div>
+    <div class="center small" style="margin-top:6px">{{footerText}}</div>
+  </div>
+</body>
+</html>

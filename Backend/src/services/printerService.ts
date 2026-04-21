@@ -1081,6 +1081,7 @@ const printViaLocalBrowser = async (
   htmlContent: string,
   tag = 'print',
   printerMeta?: { terminalNodeId?: string | null; terminalPrinterLocalId?: string | null },
+  cloudTemplate?: { kind?: string; data?: Record<string, unknown> },
 ): Promise<void> => {
   if (await shouldEnqueueTerminalJob(printerMeta)) {
     await enqueuePrintJob({
@@ -1092,6 +1093,8 @@ const printViaLocalBrowser = async (
         printerName,
         fileName: `${sanitizeFileName(String(tag || 'print'), 'print')}.html`,
         htmlBase64: Buffer.from(String(htmlContent || ''), 'utf8').toString('base64'),
+        templateKind: String(cloudTemplate?.kind || '').trim() || undefined,
+        templateData: cloudTemplate?.data || undefined,
       },
       maxRetries: 3,
     });
@@ -1794,6 +1797,23 @@ export async function printOrderItemsByPrinter(
         await printViaLocalBrowser(printer.name, bonHtml, `bon-${isBar ? 'bar' : 'cuisine'}`, {
           terminalNodeId: (printer as any).terminalNodeId || null,
           terminalPrinterLocalId: (printer as any).terminalPrinterLocalId || null,
+        }, {
+          kind: isBar ? 'bar' : 'kitchen',
+          data: {
+            title: String(options?.titleOverride || tpl?.title || (isBar ? 'BON BAR' : 'BON CUISINE')),
+            orderNumber: String(order?.ticketNumber || ''),
+            orderRef: String(orderRef || ''),
+            tableNumber: String(order?.tableNumber || ''),
+            serverName: String(order?.serverName || ''),
+            createdAt: formatPrintableDate(order?.createdAt || Date.now()),
+            orderType: String(order?.type || ''),
+            items: list.map((it: any) => ({
+              name: String(it?.name || 'Article'),
+              quantity: Number(it?.quantity || 0),
+              notes: String(it?.notes || ''),
+            })),
+            footerText: footerLine,
+          } as any,
         });
       }
     } catch (err) {
@@ -2021,6 +2041,16 @@ export async function printPaymentReceipt(
         await printViaLocalBrowser(printTarget, receiptHtml, `receipt-${sanitizeFileName(ticketCode, 'ticket')}`, {
           terminalNodeId: (mapped as any)?.terminalNodeId || null,
           terminalPrinterLocalId: (mapped as any)?.terminalPrinterLocalId || null,
+        }, {
+          kind: nacefTemplateActive ? 'client_nacef' : 'client_default',
+          data: buildClientTemplateData(
+            settings,
+            order,
+            ticket,
+            items,
+            effectivePaymentMethod,
+            amount,
+          ) as any,
         });
       }
     } catch (err) {
@@ -2239,6 +2269,16 @@ export async function  printProvisionalClientReceipt(orderId: string) {
       await printViaLocalBrowser(printTarget, provHtml, `prov-receipt`, {
         terminalNodeId: (mapped as any)?.terminalNodeId || null,
         terminalPrinterLocalId: (mapped as any)?.terminalPrinterLocalId || null,
+      }, {
+        kind: nacefTemplateActive ? 'client_nacef' : 'client_default',
+        data: buildClientTemplateData(
+          settings,
+          order,
+          fakeTicket,
+          fakeItems,
+          paymentMethod,
+          undefined,
+        ) as any,
       });
     }
   } catch (err) {
@@ -2336,6 +2376,23 @@ export async function printProductionTest(opts: {
     await printViaLocalBrowser(target.name, testBonHtml, `test-${isBar ? 'bar' : 'cuisine'}`, {
       terminalNodeId: (target as any).terminalNodeId || null,
       terminalPrinterLocalId: (target as any).terminalPrinterLocalId || null,
+    }, {
+      kind: isBar ? 'bar' : 'kitchen',
+      data: {
+        title: String(tpl?.title || (isBar ? 'BON BAR' : 'BON CUISINE')),
+        orderRef: 'TEST01',
+        tableNumber: 'TEST',
+        serverName: 'TEST',
+        createdAt: formatPrintableDate(Date.now()),
+        items: [
+          {
+            name: isBar ? 'Mojito' : 'Pizza Margherita',
+            quantity: 1,
+            notes: tpl?.showItemNotes !== false ? 'TEST' : '',
+          },
+        ],
+        footerText: String(tpl?.footerText || '').trim(),
+      },
     });
   }
   return {
@@ -2421,6 +2478,26 @@ export async function printReceiptTest(opts: { printerId?: string }) {
     await printViaLocalBrowser(target.name, testReceiptHtml, 'test-receipt', {
       terminalNodeId: (target as any).terminalNodeId || null,
       terminalPrinterLocalId: (target as any).terminalPrinterLocalId || null,
+    }, {
+      kind: nacefTemplateActive ? 'client_nacef' : 'client_default',
+      data: {
+        restaurantName: String((settings as any)?.restaurantName || 'AxiaFlex'),
+        headerText: 'Ticket test',
+        footerText: 'Merci et a bientot !',
+        ticketCode: 'TK-TEST',
+        orderNumber: 'OR-TEST',
+        orderRef: 'OR-TEST',
+        tableNumber: 'TEST',
+        serverName: 'TEST',
+        createdAt: formatPrintableDate(now),
+        items: [{ name: 'Article test', quantity: 1, unitPrice: 1, total: 1 }],
+        subtotal: '1.000',
+        discount: '0.000',
+        timbre: '0.000',
+        total: '1.000',
+        amount: '1.000',
+        currency: String((settings as any)?.currency || 'DT'),
+      } as any,
     });
   }
   return {

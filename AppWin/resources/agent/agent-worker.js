@@ -15,6 +15,7 @@ const SITE_NAME = String(process.env.SITE_NAME || "").trim();
 const POLL_MS = Math.max(500, Number(process.env.AGENT_POLL_MS || 1000));
 const AGENT_HOME = path.join(process.env.LOCALAPPDATA || os.tmpdir(), "AxiaPrinters", "AppWinAgent");
 const STATE_FILE = path.join(AGENT_HOME, "state.json");
+const TEMPLATES_DIR = path.join(AGENT_HOME, "templates");
 
 async function ps(command) {
   const { stdout } = await execFileAsync("powershell", [
@@ -260,6 +261,52 @@ function htmlToPlainText(rawHtml) {
     .trim();
 }
 
+function getByPath(obj, dotPath) {
+  const parts = String(dotPath || "").split(".").filter(Boolean);
+  let cur = obj;
+  for (const p of parts) {
+    if (cur == null) return "";
+    cur = cur[p];
+  }
+  if (cur == null) return "";
+  return typeof cur === "object" ? JSON.stringify(cur) : String(cur);
+}
+
+function renderTemplateString(template, data) {
+  let out = String(template || "");
+  out = out.replace(/{{#each\s+([a-zA-Z0-9_.]+)}}([\s\S]*?){{\/each}}/g, (_m, arrPath, block) => {
+    const arr = getByPath(data, arrPath);
+    let items = [];
+    try {
+      items = Array.isArray(arr) ? arr : JSON.parse(String(arr || "[]"));
+      if (!Array.isArray(items)) items = [];
+    } catch {
+      items = [];
+    }
+    return items
+      .map((it) =>
+        String(block || "").replace(/{{\s*(this\.)?([a-zA-Z0-9_.]+)\s*}}/g, (_x, _thisP, p) => {
+          const v = getByPath(it, p);
+          return String(v || "");
+        }),
+      )
+      .join("");
+  });
+  out = out.replace(/{{\s*([a-zA-Z0-9_.]+)\s*}}/g, (_m, p) => String(getByPath(data, p) || ""));
+  return out;
+}
+
+async function loadLocalTemplate(slot) {
+  const safe = String(slot || "").trim().toLowerCase();
+  if (!safe) return "";
+  const p = path.join(TEMPLATES_DIR, `${safe}.html`);
+  try {
+    return await fs.readFile(p, "utf8");
+  } catch {
+    return "";
+  }
+}
+
 async function printPdfBase64(printerName, pdfBase64) {
   const tmp = path.join(os.tmpdir(), `axiaprinters-print-${Date.now()}.pdf`);
   const data = Buffer.from(String(pdfBase64 || ""), "base64");
@@ -390,7 +437,15 @@ async function processJobs(token) {
       } else if (type === "HTML_PRINT") {
         const htmlBase64 = String(payload.htmlBase64 || "").trim();
         const htmlRaw = String(payload.html || payload.renderedHtml || "").trim();
-        const effectiveBase64 = htmlBase64 || (htmlRaw ? Buffer.from(htmlRaw, "utf8").toString("base64") : "");
+        let finalHtml = htmlRaw || (htmlBase64 ? Buffer.from(htmlBase64, "base64").toString("utf8") : "");
+        const templateKind = String(payload.templateKind || "").trim().toLowerCase();
+        if (templateKind) {
+          const localTpl = await loadLocalTemplate(templateKind);
+          if (localTpl) {
+            finalHtml = renderTemplateString(localTpl, payload.templateData || {});
+          }
+        }
+        const effectiveBase64 = finalHtml ? Buffer.from(finalHtml, "utf8").toString("base64") : "";
         if (!effectiveBase64) throw new Error("Missing HTML payload");
         await printHtmlBase64(printerName, effectiveBase64);
       } else {

@@ -42,6 +42,16 @@ const els = {
   bridgeServerRestartBtn: byId("bridgeServerRestartBtn"),
   bridgeServerStatusBtn: byId("bridgeServerStatusBtn"),
   bridgeHealthBtn: byId("bridgeHealthBtn"),
+  tplRefreshBtn: byId("tplRefreshBtn"),
+  tplImportClientNacefBtn: byId("tplImportClientNacefBtn"),
+  tplImportClientDefaultBtn: byId("tplImportClientDefaultBtn"),
+  tplImportKitchenBtn: byId("tplImportKitchenBtn"),
+  tplImportBarBtn: byId("tplImportBarBtn"),
+  tplClearClientNacefBtn: byId("tplClearClientNacefBtn"),
+  tplClearClientDefaultBtn: byId("tplClearClientDefaultBtn"),
+  tplClearKitchenBtn: byId("tplClearKitchenBtn"),
+  tplClearBarBtn: byId("tplClearBarBtn"),
+  templatesStatus: byId("templatesStatus"),
   refreshPrintersBtn: byId("refreshPrintersBtn"),
   printersSelect: byId("printersSelect"),
   testPrintText: byId("testPrintText"),
@@ -152,6 +162,24 @@ async function refreshPrinters() {
   });
 }
 
+async function refreshTemplatesStatus() {
+  const res = await appWinApi.listTemplates();
+  if (!res?.ok) {
+    els.templatesStatus.textContent = `Erreur templates: ${res?.error || "inconnue"}`;
+    return;
+  }
+  const slots = res?.slots || {};
+  const order = ["client_nacef", "client_default", "kitchen", "bar"];
+  els.templatesStatus.textContent = order
+    .map((k) => {
+      const s = slots[k] || {};
+      return s.exists
+        ? `${k}: OK (${Number(s.size || 0)} bytes) - ${String(s.updatedAt || "")}`
+        : `${k}: non défini`;
+    })
+    .join("\n");
+}
+
 async function saveConfig() {
   await appWinApi.saveConfig({
     cloudApiUrl: els.cloudApiUrl.value.trim(),
@@ -205,6 +233,7 @@ async function init() {
   const bridgeSrv = await appWinApi.desktopBridgeServerStatus();
   setBridgeServerStatusText(bridgeSrv);
   await refreshPrinters();
+  await refreshTemplatesStatus();
 }
 
 els.saveBtn.addEventListener("click", async () => {
@@ -384,6 +413,50 @@ els.bridgeHealthBtn.addEventListener("click", async () => {
       ? `Desktop Bridge health OK: ${res?.stdout || ""}`
       : `Desktop Bridge health KO: ${res?.stderr || res?.stdout || res?.error || "offline"}`,
   );
+});
+
+els.tplRefreshBtn.addEventListener("click", async () => {
+  await refreshTemplatesStatus();
+});
+els.tplImportClientNacefBtn.addEventListener("click", async () => {
+  const res = await appWinApi.importTemplate("client_nacef");
+  appendLog(res?.ok ? "Template client NACEF importé." : `Import KO: ${res?.error || "annulé"}`);
+  await refreshTemplatesStatus();
+});
+els.tplImportClientDefaultBtn.addEventListener("click", async () => {
+  const res = await appWinApi.importTemplate("client_default");
+  appendLog(res?.ok ? "Template client défaut importé." : `Import KO: ${res?.error || "annulé"}`);
+  await refreshTemplatesStatus();
+});
+els.tplImportKitchenBtn.addEventListener("click", async () => {
+  const res = await appWinApi.importTemplate("kitchen");
+  appendLog(res?.ok ? "Template cuisine importé." : `Import KO: ${res?.error || "annulé"}`);
+  await refreshTemplatesStatus();
+});
+els.tplImportBarBtn.addEventListener("click", async () => {
+  const res = await appWinApi.importTemplate("bar");
+  appendLog(res?.ok ? "Template bar importé." : `Import KO: ${res?.error || "annulé"}`);
+  await refreshTemplatesStatus();
+});
+els.tplClearClientNacefBtn.addEventListener("click", async () => {
+  const res = await appWinApi.clearTemplate("client_nacef");
+  appendLog(res?.ok ? "Template client NACEF supprimé." : `Suppression KO: ${res?.error || "inconnue"}`);
+  await refreshTemplatesStatus();
+});
+els.tplClearClientDefaultBtn.addEventListener("click", async () => {
+  const res = await appWinApi.clearTemplate("client_default");
+  appendLog(res?.ok ? "Template client défaut supprimé." : `Suppression KO: ${res?.error || "inconnue"}`);
+  await refreshTemplatesStatus();
+});
+els.tplClearKitchenBtn.addEventListener("click", async () => {
+  const res = await appWinApi.clearTemplate("kitchen");
+  appendLog(res?.ok ? "Template cuisine supprimé." : `Suppression KO: ${res?.error || "inconnue"}`);
+  await refreshTemplatesStatus();
+});
+els.tplClearBarBtn.addEventListener("click", async () => {
+  const res = await appWinApi.clearTemplate("bar");
+  appendLog(res?.ok ? "Template bar supprimé." : `Suppression KO: ${res?.error || "inconnue"}`);
+  await refreshTemplatesStatus();
 });
 
 els.refreshPrintersBtn.addEventListener("click", async () => {

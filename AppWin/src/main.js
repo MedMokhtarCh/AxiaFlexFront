@@ -15,6 +15,7 @@ const APP_BRAND = "AxiaPrinters";
 const AGENT_TASK_NAME = "AxiaPrintersPrintAgent";
 const BRIDGE_TASK_NAME = "AxiaPrintersDesktopBridgeAutostart";
 const AGENT_HOME_DIR = "AppWinAgent";
+const TEMPLATE_SLOTS = ["client_nacef", "client_default", "kitchen", "bar"];
 
 async function postJson(url, body, headers = {}) {
   const res = await fetch(String(url || ""), {
@@ -112,6 +113,10 @@ async function syncPrintersOnce(config) {
 
 function getConfigPath() {
   return path.join(app.getPath("userData"), "agent-config.json");
+}
+
+function getTemplatesDir() {
+  return path.join(process.env.LOCALAPPDATA || app.getPath("userData"), APP_BRAND, AGENT_HOME_DIR, "templates");
 }
 
 function getDefaultConfig() {
@@ -1013,6 +1018,66 @@ app.whenReady().then(() => {
       "Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue";
     const out = await runPowershellCommand(cmd);
     return { ok: out.ok, error: out.ok ? null : out.stderr || out.stdout || "print failed" };
+  });
+  ipcMain.handle("templates:list", async () => {
+    try {
+      const dir = getTemplatesDir();
+      fs.mkdirSync(dir, { recursive: true });
+      const entries = {};
+      for (const slot of TEMPLATE_SLOTS) {
+        const p = path.join(dir, `${slot}.html`);
+        if (fs.existsSync(p)) {
+          const st = fs.statSync(p);
+          entries[slot] = { exists: true, path: p, updatedAt: st.mtime.toISOString(), size: Number(st.size || 0) };
+        } else {
+          entries[slot] = { exists: false };
+        }
+      }
+      return { ok: true, slots: entries };
+    } catch (e) {
+      return { ok: false, error: String(e?.message || e) };
+    }
+  });
+  ipcMain.handle("templates:import", async (_event, slot) => {
+    try {
+      const safeSlot = String(slot || "").trim();
+      if (!TEMPLATE_SLOTS.includes(safeSlot)) {
+        return { ok: false, error: "Slot template invalide." };
+      }
+      const win = BrowserWindow.getFocusedWindow() || mainWindow;
+      const picked = await dialog.showOpenDialog(win, {
+        title: `Importer template ${safeSlot}`,
+        properties: ["openFile"],
+        filters: [
+          { name: "Templates HTML", extensions: ["html", "htm"] },
+          { name: "Tous les fichiers", extensions: ["*"] },
+        ],
+      });
+      if (picked.canceled || !picked.filePaths?.length) return { ok: false, canceled: true };
+      const src = String(picked.filePaths[0] || "");
+      const dir = getTemplatesDir();
+      fs.mkdirSync(dir, { recursive: true });
+      const dst = path.join(dir, `${safeSlot}.html`);
+      fs.copyFileSync(src, dst);
+      return { ok: true, slot: safeSlot, path: dst };
+    } catch (e) {
+      return { ok: false, error: String(e?.message || e) };
+    }
+  });
+  ipcMain.handle("templates:clear", async (_event, slot) => {
+    try {
+      const safeSlot = String(slot || "").trim();
+      if (!TEMPLATE_SLOTS.includes(safeSlot)) {
+        return { ok: false, error: "Slot template invalide." };
+      }
+      const p = path.join(getTemplatesDir(), `${safeSlot}.html`);
+      try {
+        fs.unlinkSync(p);
+      } catch {}
+      return { ok: true, slot: safeSlot };
+    } catch (e) {
+      return { ok: false, error: String(e?.message || e) };
+    }
   });
   ipcMain.handle("service:install", async () => {
     const cfg = currentConfig || loadConfig();

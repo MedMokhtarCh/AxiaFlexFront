@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    @page { size: 80mm auto; margin: 0; }
+    html, body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+    .wrap { width: 76mm; margin: 0 auto; padding: 2mm 0; color: #111; }
+    .center { text-align: center; }
+    .sep { border-top: 1px dashed #555; margin: 6px 0; }
+    .title { font-size: 18px; font-weight: 800; }
+    .small { font-size: 10px; }
+    .item { font-size: 14px; font-weight: 700; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="center title">{{title}}</div>
+    <div class="small">Commande: {{orderNumber}}</div>
+    <div class="small">Réf: {{orderRef}}</div>
+    <div class="small">Table: {{tableNumber}}</div>
+    <div class="small">Serveur: {{serverName}}</div>
+    <div class="small">Heure: {{createdAt}}</div>
+    <div class="sep"></div>
+
+    {{#each items}}
+      <div class="item">- {{this.name}} x{{this.quantity}}</div>
+      <div class="small">{{this.notes}}</div>
+    {{/each}}
+
+    <div class="sep"></div>
+    <div class="center small">{{footerText}}</div>
+  </div>
+</body>
+</html>
