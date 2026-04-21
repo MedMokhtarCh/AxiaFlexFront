@@ -1889,6 +1889,7 @@ export async function printPaymentReceipt(
   await fs.mkdir(targetDir, { recursive: true });
   const designerClientHtml = getDesignerTemplateHtml(settings, 'client');
   const clientSource = getPrintTemplateSource(settings, 'client');
+  const nacefTemplateActive = isNacefPrintTemplateActive(settings);
   const assignedName = await resolvePhysicalPrinterNameForOrderServer(order);
   const printTarget = assignedName || receipt?.name;
   if (!printTarget) {
@@ -1982,7 +1983,7 @@ export async function printPaymentReceipt(
       continue;
     }
     try {
-      if (getPrintTemplateSource(settings, 'client') === 'DESIGNER' && designerClientHtml) {
+      if (!nacefTemplateActive && getPrintTemplateSource(settings, 'client') === 'DESIGNER' && designerClientHtml) {
         const renderedHtml = renderExternalClientTemplate(
           String(designerClientHtml || ''),
           buildClientTemplateData(
@@ -2148,6 +2149,7 @@ export async function  printProvisionalClientReceipt(orderId: string) {
   const mapped = printers.find((p: any) => String(p.name || '') === String(printTarget || ''));
   const designerClientHtml = getDesignerTemplateHtml(settings, 'client');
   const clientSource = getPrintTemplateSource(settings, 'client');
+  const nacefTemplateActive = isNacefPrintTemplateActive(settings);
   if (isDesktopBridgeMode(settings)) {
     let renderedHtmlForBridge = '';
     const nacefTemplateActive = isNacefPrintTemplateActive(settings);
@@ -2212,7 +2214,7 @@ export async function  printProvisionalClientReceipt(orderId: string) {
     return;
   }
   try {
-    if (getPrintTemplateSource(settings, 'client') === 'DESIGNER' && designerClientHtml) {
+    if (!nacefTemplateActive && getPrintTemplateSource(settings, 'client') === 'DESIGNER' && designerClientHtml) {
       const renderedHtml = renderExternalClientTemplate(
         String(designerClientHtml || ''),
         buildClientTemplateData(settings, order, fakeTicket, fakeItems, undefined),
@@ -2373,7 +2375,8 @@ export async function printReceiptTest(opts: { printerId?: string }) {
   ];
   const settings = await getSettings();
   const designerHtml = getDesignerTemplateHtml(settings, 'client');
-  if (getPrintTemplateSource(settings, 'client') === 'DESIGNER' && designerHtml) {
+  const nacefTemplateActive = isNacefPrintTemplateActive(settings);
+  if (!nacefTemplateActive && getPrintTemplateSource(settings, 'client') === 'DESIGNER' && designerHtml) {
     const renderedHtml = renderExternalClientTemplate(String(designerHtml || ''), {
       restaurantName: String((settings as any)?.restaurantName || 'AxiaFlex'),
       headerText: 'Ticket test',
