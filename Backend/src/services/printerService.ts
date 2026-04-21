@@ -527,6 +527,15 @@ const buildClientTemplateData = (
   ),
   currency: String((settings as any)?.currency || 'DT'),
   logoSrc,
+  logoUrl: logoSrc,
+  nacefJson: (() => {
+    try {
+      const payload = parseFiscalPayloadJson(ticket);
+      return payload ? JSON.stringify(payload, null, 2) : '';
+    } catch {
+      return '';
+    }
+  })(),
   };
 };
 const formatPrintableDate = (raw: any) => {
@@ -807,6 +816,7 @@ ${paymentsHtml ? `<hr class="sep"><div style="font-size:9px;color:#64748b">${pay
   <div>Statut: ${String((ticket as any)?.fiscalStatus || 'PENDING').toUpperCase()}</div>
   ${String((ticket as any)?.fiscalMode || '').trim() ? `<div>Mode: ${String((ticket as any).fiscalMode).toUpperCase()}</div>` : ''}
   ${String((ticket as any)?.fiscalErrorCode || '').trim() ? `<div>Code erreur: ${String((ticket as any).fiscalErrorCode)}</div>` : ''}
+  ${payload && Object.keys(payload).length ? `<pre style="margin-top:6px;padding:6px;border:1px dashed #cbd5e1;border-radius:6px;background:#f8fafc;font-size:8px;line-height:1.3;white-space:pre-wrap;word-break:break-word">${String(JSON.stringify(payload, null, 2)).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>` : ''}
 </div>
 ${String((ticket as any)?.fiscalQrPayload || '').trim() ? `<div style="text-align:center;margin-top:8px"><img src="https://quickchart.io/qr?text=${encodeURIComponent(String((ticket as any).fiscalQrPayload))}&size=180&ecLevel=H&margin=2" style="width:180px;height:180px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;padding:6px" /><div style="font-size:9px;color:#64748b;margin-top:4px">QR fiscal NACEF</div></div>` : ''}
 </div>
@@ -1146,7 +1156,7 @@ const buildModelReceiptHtml = (
     const unit = Number((it as any).unitPrice || 0);
     const tot  = qty * unit;
     subtotal  += tot;
-    itemsHtml += `<div style="display:flex;justify-content:space-between;gap:8px;font-size:13px;font-weight:700;color:#374151;margin-bottom:3px">
+    itemsHtml += `<div style="display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:700;color:#374151;margin-bottom:2px">
 <span>${qty}x ${String((it as any).name || 'Article')}${show('showItemUnitPrice') ? ` <span style="font-weight:400;color:#94a3b8">(${unit.toFixed(3)} ${currency})</span>` : ''}</span>
 <span style="white-space:nowrap">${tot.toFixed(3)} ${currency}</span></div>`;
   }
@@ -1185,7 +1195,7 @@ const buildModelReceiptHtml = (
     show('showTimbre') && timbre > 0 ?
       `<div style="display:flex;justify-content:space-between;color:#3b82f6"><span>Timbre</span><span>${timbre.toFixed(3)} ${currency}</span></div>` : '',
     show('showPriceTtc') ?
-      `<div style="display:flex;justify-content:space-between;color:#4338ca;font-size:18px;font-weight:900"><span>Prix TTC</span><span>${grandTot.toFixed(3)} ${currency}</span></div>` : '',
+      `<div style="display:flex;justify-content:space-between;color:#4338ca;font-size:14px;font-weight:900"><span>Prix TTC</span><span>${grandTot.toFixed(3)} ${currency}</span></div>` : '',
     typeof amount === 'number' ?
       `<div style="display:flex;justify-content:space-between;font-size:9px;color:#64748b"><span>R&#232;glement${paymentMethod ? ` (${paymentMethod})` : ''}</span><span>${amount.toFixed(3)} ${currency}</span></div>` : '',
   ].filter(Boolean).join('');
@@ -1202,6 +1212,7 @@ const buildModelReceiptHtml = (
   ${String((ticket as any)?.fiscalMode || '').trim() ? `<div>Mode: ${String((ticket as any).fiscalMode).toUpperCase()}</div>` : ''}
   ${String((ticket as any)?.fiscalImdf || '').trim() ? `<div>IMDF: ${String((ticket as any).fiscalImdf)}</div>` : ''}
   ${String((ticket as any)?.fiscalErrorCode || '').trim() ? `<div>Code erreur: ${String((ticket as any).fiscalErrorCode)}</div>` : ''}
+  ${nacefPayload && Object.keys(nacefPayload).length ? `<pre style="margin-top:6px;padding:6px;border:1px dashed #cbd5e1;border-radius:6px;background:#f8fafc;font-size:8px;line-height:1.3;white-space:pre-wrap;word-break:break-word">${String(JSON.stringify(nacefPayload, null, 2)).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>` : ''}
 </div>
 ${String((ticket as any)?.fiscalQrPayload || '').trim() ? `<div style="text-align:center;margin-top:8px"><img src="https://quickchart.io/qr?text=${encodeURIComponent(String((ticket as any).fiscalQrPayload))}&size=180&ecLevel=H&margin=2" style="width:180px;height:180px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;padding:6px" /><div style="font-size:9px;color:#64748b;margin-top:4px">QR fiscal NACEF</div></div>` : ''}`
     : '';
@@ -1219,17 +1230,17 @@ html,body{height:fit-content;min-height:0;overflow:visible;background:#f1f5f9;fo
 </style></head><body>
 <div class="notice">&#x1F5A8; S&eacute;lectionnez&nbsp;: <strong>${safe}</strong> &mdash; puis cliquez <strong>Imprimer</strong></div>
 <div class="card">
-${showLogo ? `<div style="text-align:center;margin-bottom:8px"><img src="${logoSrc}" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:1px solid #e2e8f0" onerror="this.style.display='none'"></div>` : ''}
-<div style="text-align:center;font-size:22px;font-weight:900;color:#1e293b">${rName}</div>
-${headerTxt ? `<div style="text-align:center;font-size:12px;color:#64748b;margin-top:3px">${headerTxt}</div>` : ''}
+${showLogo ? `<div style="text-align:center;margin-bottom:8px"><img src="${logoSrc}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:1px solid #e2e8f0" onerror="this.style.display='none'"></div>` : ''}
+<div style="text-align:center;font-size:16px;font-weight:900;color:#1e293b">${rName}</div>
+${headerTxt ? `<div style="text-align:center;font-size:9px;color:#64748b;margin-top:2px">${headerTxt}</div>` : ''}
 <hr class="sep">
-<div style="font-size:12px;color:#64748b;text-align:center;line-height:1.6">${metaHtml}</div>
+<div style="font-size:9px;color:#64748b;text-align:center;line-height:1.5">${metaHtml}</div>
 <hr class="sep">
 <div>${itemsHtml}</div>
 <hr class="sep">
-<div style="font-size:13px;font-weight:700;color:#1e293b;line-height:2">${totalsHtml}</div>
+<div style="font-size:10px;font-weight:700;color:#1e293b;line-height:1.9">${totalsHtml}</div>
 ${nacefBlockHtml}
-${footerTxt ? `<hr class="sep"><div style="text-align:center;font-size:12px;color:#64748b">${footerTxt}</div>` : ''}
+${footerTxt ? `<hr class="sep"><div style="text-align:center;font-size:9px;color:#64748b">${footerTxt}</div>` : ''}
 </div>
 <script>
 window.onload=function(){
@@ -1271,12 +1282,12 @@ const buildProductionHtmlBody = (
     tpl?.showTime   !== false ? `<div><span style="color:#555">Heure:</span> ${formatPrintableDate((order as any)?.createdAt || Date.now())}</div>` : '',
   ].filter(Boolean).join('');
   const footerTxt = String(tpl?.footerText || '').trim();
-  return `<div style="font-size:13px;font-weight:700;color:#334155">
-<p class="c" style="font-size:24px;font-weight:900;padding:6px 0 3px;margin:0;color:#0f172a">${title}</p>
-<div style="margin-top:4px;font-size:12px;color:#64748b;line-height:1.45">${metaRows}</div>
+  return `<div style="font-size:11px;font-weight:700;color:#334155">
+<p class="c" style="font-size:20px;font-weight:900;padding:4px 0 2px;margin:0;color:#0f172a">${title}</p>
+<div style="margin-top:4px;font-size:10px;color:#64748b;line-height:1.35">${metaRows}</div>
 <div class="dash"></div>
-<div style="font-size:18px;font-weight:800;color:#111827;line-height:1.55">${itemsHtml}</div>
-${footerTxt ? `<div class="dash"></div><p class="c" style="color:#64748b;margin-top:6px;font-size:12px">${footerTxt}</p>` : ''}
+<div style="font-size:14px;font-weight:800;color:#111827;line-height:1.45">${itemsHtml}</div>
+${footerTxt ? `<div class="dash"></div><p class="c" style="color:#64748b;margin-top:4px">${footerTxt}</p>` : ''}
 </div>`;
 };
 

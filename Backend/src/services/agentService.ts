@@ -119,10 +119,17 @@ export async function upsertTerminalPrinters(
   for (const raw of Array.isArray(printers) ? printers : []) {
     const name = String(raw.Name ?? raw.name ?? '').trim();
     if (!name) continue;
-    const localId = String(raw.printerLocalId ?? raw.PortName ?? raw.portName ?? name)
+    const baseLocalId = String(raw.printerLocalId ?? raw.PortName ?? raw.portName ?? name)
       .trim()
       .slice(0, 240);
-    if (!localId) continue;
+    if (!baseLocalId) continue;
+    // Avoid collapsing multiple printer copies sharing the same port.
+    // Keep a deterministic, per-terminal unique local id.
+    let localId = baseLocalId;
+    if (touched.has(localId)) {
+      localId = `${baseLocalId}::${name}`.slice(0, 240);
+    }
+    if (touched.has(localId)) continue;
     touched.add(localId);
     const next = {
       terminalNodeId: terminalId,

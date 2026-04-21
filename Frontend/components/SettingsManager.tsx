@@ -7298,7 +7298,7 @@ const SettingsManager: React.FC = () => {
                   <button
                     onClick={() => {
                       const p = detectedPrinters.find(
-                        (d) => d.Name === selectedDetected,
+                        (d) => `${d.Name}::${d.PortName || ""}` === selectedDetected,
                       );
                       if (p) {
                         setNewPrinterName(p.Name);
@@ -7323,8 +7323,11 @@ const SettingsManager: React.FC = () => {
                       : "Imprimantes détectées..."}
                   </option>
                   {detectedPrinters.map((p) => (
-                    <option key={p.Name} value={p.Name}>
-                      {p.Name}
+                    <option
+                      key={`${p.Name}::${p.PortName || ""}`}
+                      value={`${p.Name}::${p.PortName || ""}`}
+                    >
+                      {p.Name} {p.PortName ? `(${p.PortName})` : ""}
                     </option>
                   ))}
                 </select>

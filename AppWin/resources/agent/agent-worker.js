@@ -174,10 +174,12 @@ async function printRawFile(printerName, filePath, docName = "AxiaPrinters RAW")
 
 function pngBufferToEscPosRaster(pngBuffer, options = {}) {
   const maxWidth = Math.max(384, Number(options.maxWidth || 576));
-  const maxHeight = Math.max(400, Number(options.maxHeight || 2400));
+  const maxHeight = Math.max(400, Number(options.maxHeight || 1800));
   const threshold = Number(options.threshold || 170);
   const minContentRows = Math.max(40, Number(options.minContentRows || 80));
   const bottomMarginRows = Math.max(8, Number(options.bottomMarginRows || 24));
+  const topMarginRows = Math.max(0, Number(options.topMarginRows || 4));
+  const minRowInkPixels = Math.max(1, Number(options.minRowInkPixels || 6));
   const png = PNG.sync.read(pngBuffer);
   const srcW = Number(png.width || 0);
   const srcH = Number(png.height || 0);
@@ -188,11 +190,11 @@ function pngBufferToEscPosRaster(pngBuffer, options = {}) {
   const outH = Math.max(1, Math.min(maxHeight, Math.floor(srcH * scale)));
   const xBytes = Math.ceil(outW / 8);
   const raster = Buffer.alloc(xBytes * outH);
-  let lastInkY = -1;
+  const rowInkCounts = new Array(outH).fill(0);
 
   for (let y = 0; y < outH; y += 1) {
     const srcY = Math.min(srcH - 1, Math.floor((y * srcH) / outH));
-    let rowHasInk = false;
+    let rowInkCount = 0;
     for (let x = 0; x < outW; x += 1) {
       const srcX = Math.min(srcW - 1, Math.floor((x * srcW) / outW));
       const i = (srcY * srcW + srcX) * 4;
@@ -205,23 +207,32 @@ function pngBufferToEscPosRaster(pngBuffer, options = {}) {
       if (isBlack) {
         const idx = y * xBytes + (x >> 3);
         raster[idx] |= 0x80 >> (x & 7);
-        rowHasInk = true;
+        rowInkCount += 1;
       }
     }
-    if (rowHasInk) lastInkY = y;
+    rowInkCounts[y] = rowInkCount;
   }
 
+  let firstInkY = -1;
+  let lastInkY = -1;
+  for (let y = 0; y < outH; y += 1) {
+    if (rowInkCounts[y] >= minRowInkPixels) {
+      if (firstInkY < 0) firstInkY = y;
+      lastInkY = y;
+    }
+  }
+  const startRow = Math.max(0, firstInkY >= 0 ? firstInkY - topMarginRows : 0);
   const effectiveRows = Math.max(
     minContentRows,
-    Math.min(outH, (lastInkY >= 0 ? lastInkY + 1 : 0) + bottomMarginRows),
+    Math.min(outH - startRow, (lastInkY >= 0 ? lastInkY + 1 - startRow : 0) + bottomMarginRows),
   );
-  const rasterTrimmed = raster.subarray(0, xBytes * effectiveRows);
+  const rasterTrimmed = raster.subarray(startRow * xBytes, (startRow + effectiveRows) * xBytes);
   const xL = xBytes & 0xff;
   const xH = (xBytes >> 8) & 0xff;
   const yL = effectiveRows & 0xff;
   const yH = (effectiveRows >> 8) & 0xff;
   const header = Buffer.from([0x1b, 0x40, 0x1d, 0x76, 0x30, 0x00, xL, xH, yL, yH]);
-  const footer = Buffer.from([0x0a, 0x0a, 0x1d, 0x56, 0x41, 0x08]);
+  const footer = Buffer.from([0x0a, 0x1d, 0x56, 0x41, 0x03]);
   return Buffer.concat([header, rasterTrimmed, footer]);
 }
 
