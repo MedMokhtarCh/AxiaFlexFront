@@ -131,6 +131,7 @@ function getDefaultConfig() {
     terminalAlias: "TERMINAL-1",
     siteName: "SITE-A",
     pollMs: 3000,
+    paperWidthMm: 80,
     desktopBridge: {
       exePath: "",
       installerPath: "",
@@ -805,6 +806,7 @@ function startAgent(config) {
     TERMINAL_ALIAS: String(config.terminalAlias || "TERMINAL-1").trim(),
     SITE_NAME: String(config.siteName || "SITE-A").trim(),
     AGENT_POLL_MS: String(Math.max(1500, Number(config.pollMs) || 3000)),
+    PAPER_WIDTH_MM: String(Number(config.paperWidthMm || 80) === 50 ? 50 : 80),
   };
 
   let nodeRuntime = resolveNodeExe(config || {});

@@ -13,6 +13,7 @@ const MASTER_TOKEN = String(process.env.AGENT_MASTER_TOKEN || "").trim();
 const TERMINAL_ALIAS = String(process.env.TERMINAL_ALIAS || os.hostname()).trim();
 const SITE_NAME = String(process.env.SITE_NAME || "").trim();
 const POLL_MS = Math.max(500, Number(process.env.AGENT_POLL_MS || 1000));
+const PAPER_WIDTH_MM = Number(process.env.PAPER_WIDTH_MM || 80) === 50 ? 50 : 80;
 const AGENT_HOME = path.join(process.env.LOCALAPPDATA || os.tmpdir(), "AxiaPrinters", "AppWinAgent");
 const STATE_FILE = path.join(AGENT_HOME, "state.json");
 const TEMPLATES_DIR = path.join(AGENT_HOME, "templates");
@@ -266,19 +267,20 @@ function pngBufferToEscPosRaster(pngBuffer, options = {}) {
 
 async function printHtmlAsEscPosImage(printerName, browserPath, htmlPath) {
   const tmpPng = path.join(os.tmpdir(), `axiaprinters-print-${Date.now()}.png`);
+  const targetPxWidth = PAPER_WIDTH_MM === 50 ? 384 : 576;
   try {
     const url = pathToFileURL(htmlPath).toString();
     await execFileAsync(browserPath, [
       "--headless",
       "--disable-gpu",
       "--hide-scrollbars",
-      "--window-size=576,2200",
+      `--window-size=${targetPxWidth},2200`,
       `--screenshot=${tmpPng}`,
       url,
     ]);
     const pngBuffer = await fs.readFile(tmpPng);
     const escpos = pngBufferToEscPosRaster(pngBuffer, {
-      maxWidth: 576,
+      maxWidth: targetPxWidth,
       maxHeight: 2400,
       threshold: 170,
     });
@@ -397,8 +399,9 @@ async function printPdfFile(printerName, pdfPath) {
 async function printHtmlBase64(printerName, htmlBase64) {
   const tmpHtml = path.join(os.tmpdir(), `axiaprinters-print-${Date.now()}.html`);
   const tmpPdf = path.join(os.tmpdir(), `axiaprinters-print-${Date.now()}.pdf`);
-  const data = Buffer.from(String(htmlBase64 || ""), "base64");
-  await fs.writeFile(tmpHtml, data);
+  const rawHtml = Buffer.from(String(htmlBase64 || ""), "base64").toString("utf8");
+  const normalizedHtml = normalizeHtmlForCloudPrint(rawHtml, PAPER_WIDTH_MM === 50 ? 384 : 576);
+  await fs.writeFile(tmpHtml, Buffer.from(normalizedHtml, "utf8"));
   try {
     const candidates = [
       "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
@@ -440,6 +443,21 @@ async function printHtmlBase64(printerName, htmlBase64) {
     await fs.unlink(tmpHtml).catch(() => undefined);
     await fs.unlink(tmpPdf).catch(() => undefined);
   }
+}
+
+function normalizeHtmlForCloudPrint(html, targetPxWidth) {
+  let out = String(html || "");
+  // Replace rigid paper-size CSS that shrinks receipt inside screenshot viewport.
+  out = out.replace(/@page\s*\{[^}]*\}/gi, "@page{size:auto;margin:0}");
+  out = out.replace(/width\s*:\s*\d+(\.\d+)?mm/gi, "width:100%");
+  const forceStyle = `
+<style id="axiaprinters-force-width">
+html,body{width:${Number(targetPxWidth || 576)}px !important;max-width:${Number(targetPxWidth || 576)}px !important;margin:0 !important;padding:0 !important;overflow:visible !important;background:#fff !important}
+body>*{max-width:${Number(targetPxWidth || 576)}px !important}
+.wrap,.card,.container,.ticket,.receipt{width:100% !important;max-width:none !important;margin-left:0 !important;margin-right:0 !important}
+</style>`;
+  if (/<\/head>/i.test(out)) return out.replace(/<\/head>/i, `${forceStyle}</head>`);
+  return `${forceStyle}${out}`;
 }
 
 async function resolvePrinterNameForJob(job, payload) {

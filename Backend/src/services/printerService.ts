@@ -855,7 +855,6 @@ ${paymentsHtml ? `<hr class="sep"><div style="font-size:9px;color:#64748b">${pay
   <div>Statut: ${String((ticket as any)?.fiscalStatus || 'PENDING').toUpperCase()}</div>
   ${String((ticket as any)?.fiscalMode || '').trim() ? `<div>Mode: ${String((ticket as any).fiscalMode).toUpperCase()}</div>` : ''}
   ${String((ticket as any)?.fiscalErrorCode || '').trim() ? `<div>Code erreur: ${String((ticket as any).fiscalErrorCode)}</div>` : ''}
-  ${payload && Object.keys(payload).length ? `<pre style="margin-top:6px;padding:6px;border:1px dashed #cbd5e1;border-radius:6px;background:#f8fafc;font-size:8px;line-height:1.3;white-space:pre-wrap;word-break:break-word">${String(JSON.stringify(payload, null, 2)).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>` : ''}
 </div>
 ${String((ticket as any)?.fiscalQrPayload || '').trim() ? `<div style="text-align:center;margin-top:8px"><img src="https://quickchart.io/qr?text=${encodeURIComponent(String((ticket as any).fiscalQrPayload))}&size=180&ecLevel=H&margin=2" style="width:180px;height:180px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;padding:6px" /><div style="font-size:9px;color:#64748b;margin-top:4px">QR fiscal NACEF</div></div>` : ''}
 </div>
@@ -1251,7 +1250,6 @@ const buildModelReceiptHtml = (
   ${String((ticket as any)?.fiscalMode || '').trim() ? `<div>Mode: ${String((ticket as any).fiscalMode).toUpperCase()}</div>` : ''}
   ${String((ticket as any)?.fiscalImdf || '').trim() ? `<div>IMDF: ${String((ticket as any).fiscalImdf)}</div>` : ''}
   ${String((ticket as any)?.fiscalErrorCode || '').trim() ? `<div>Code erreur: ${String((ticket as any).fiscalErrorCode)}</div>` : ''}
-  ${nacefPayload && Object.keys(nacefPayload).length ? `<pre style="margin-top:6px;padding:6px;border:1px dashed #cbd5e1;border-radius:6px;background:#f8fafc;font-size:8px;line-height:1.3;white-space:pre-wrap;word-break:break-word">${String(JSON.stringify(nacefPayload, null, 2)).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>` : ''}
 </div>
 ${String((ticket as any)?.fiscalQrPayload || '').trim() ? `<div style="text-align:center;margin-top:8px"><img src="https://quickchart.io/qr?text=${encodeURIComponent(String((ticket as any).fiscalQrPayload))}&size=180&ecLevel=H&margin=2" style="width:180px;height:180px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;padding:6px" /><div style="font-size:9px;color:#64748b;margin-top:4px">QR fiscal NACEF</div></div>` : ''}`
     : '';

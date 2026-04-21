@@ -9,6 +9,7 @@ const els = {
   terminalAlias: byId("terminalAlias"),
   siteName: byId("siteName"),
   pollMs: byId("pollMs"),
+  paperWidthMm: byId("paperWidthMm"),
   nodeExePath: byId("nodeExePath"),
   bridgeInstallerPath: byId("bridgeInstallerPath"),
   bridgePickInstallerBtn: byId("bridgePickInstallerBtn"),
@@ -194,6 +195,7 @@ async function saveConfig() {
     terminalAlias: els.terminalAlias.value.trim(),
     siteName: els.siteName.value.trim(),
     pollMs: Number.parseInt(els.pollMs.value || "3000", 10),
+    paperWidthMm: Number.parseInt(els.paperWidthMm.value || "80", 10) === 50 ? 50 : 80,
     nodeExePath: String(els.nodeExePath.value || "").trim(),
     desktopBridge: {
       installerPath: String(els.bridgeInstallerPath.value || "").trim(),
@@ -218,6 +220,7 @@ async function init() {
   els.terminalAlias.value = String(cfg.terminalAlias || "TERMINAL-1");
   els.siteName.value = String(cfg.siteName || "SITE-A");
   els.pollMs.value = String(cfg.pollMs || 3000);
+  els.paperWidthMm.value = String(Number(cfg.paperWidthMm || 80) === 50 ? 50 : 80);
   els.nodeExePath.value = String(cfg.nodeExePath || "");
   const bridge = cfg?.desktopBridge || {};
   els.bridgeInstallerPath.value = String(bridge.installerPath || "");
