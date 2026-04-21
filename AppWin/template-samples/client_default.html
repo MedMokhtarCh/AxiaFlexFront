@@ -10,13 +10,15 @@
     .center { text-align: center; }
     .sep { border-top: 1px dashed #666; margin: 6px 0; }
     .small { font-size: 10px; }
-    .title { font-size: 15px; font-weight: 700; }
-    .row { display: flex; justify-content: space-between; font-size: 11px; }
+    .logo { width: 64px; height: 64px; border-radius: 999px; object-fit: cover; display: block; margin: 0 auto 8px; }
+    .title { font-size: 22px; font-weight: 800; }
+    .row { display: flex; justify-content: space-between; font-size: 14px; }
     .bold { font-weight: 700; }
   </style>
 </head>
 <body>
   <div class="wrap">
+    <img class="logo" src="{{logoUrl}}" alt="logo"/>
     <div class="center title">{{restaurantName}}</div>
     <div class="center small">{{headerText}}</div>
     <div class="center small">Ticket {{ticketCode}} - Cmd {{orderNumber}}</div>

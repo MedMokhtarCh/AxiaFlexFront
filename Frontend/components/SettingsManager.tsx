@@ -2266,6 +2266,31 @@ const SettingsManager: React.FC = () => {
     }
   };
 
+  const handleDownloadNacefHtmlTemplateSample = async () => {
+    try {
+      const response = await fetch(
+        `${SETTINGS_LOG_API_BASE}/pos/settings/client-receipt-template/nacef-html`,
+        {
+          method: "GET",
+          cache: "no-store",
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Téléchargement impossible (${response.status})`);
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") || "";
+      const match = disposition.match(/filename="([^"]+)"/i);
+      const fileName = match?.[1] || "client-nacef-template.sample.html";
+      downloadBlob(blob, fileName);
+      notifySuccess("Template HTML NACEF téléchargé.");
+    } catch (e: any) {
+      notifyError(
+        e?.message || "Téléchargement du template HTML NACEF impossible.",
+      );
+    }
+  };
+
   const handleDownloadExternalKitchenTemplateSample = () => {
     try {
       const sample = [
@@ -4501,6 +4526,14 @@ const SettingsManager: React.FC = () => {
                     >
                       <Download size={12} />
                       HTML client
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadNacefHtmlTemplateSample}
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-[10px] font-black uppercase tracking-wider hover:bg-amber-100"
+                    >
+                      <Download size={12} />
+                      HTML NACEF
                     </button>
                     <button
                       type="button"

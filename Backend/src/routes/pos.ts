@@ -169,6 +169,7 @@ router.get('/settings/pdf-archives/download', settingsController.downloadPdfArch
 router.get('/settings/migration-reports', settingsController.listMigrationReports);
 router.get('/settings/migration-reports/latest', settingsController.getLatestMigrationReport);
 router.get('/settings/client-receipt-template/sample', settingsController.downloadClientReceiptTemplateSample);
+router.get('/settings/client-receipt-template/nacef-html', settingsController.downloadNacefHtmlTemplateSample);
 router.get('/settings/print-template/preview', settingsController.downloadPrintTemplatePreview);
 router.get('/settings/desktop-bridge/test', settingsController.testDesktopBridge);
 router.get('/settings/security-status', settingsController.getSecurityOperationalStatus);

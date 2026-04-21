@@ -232,6 +232,66 @@ export async function downloadClientReceiptTemplateSample(_req: Request, res: Re
   }
 }
 
+export async function downloadNacefHtmlTemplateSample(_req: Request, res: Response) {
+  try {
+    const sample = [
+      "<!doctype html>",
+      "<html lang=\"fr\">",
+      "  <head>",
+      "    <meta charset=\"utf-8\" />",
+      "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />",
+      "    <style>",
+      "      @page { size: 80mm auto; margin: 0; }",
+      "      html, body { margin: 0; padding: 0; font-family: Arial, sans-serif; }",
+      "      .wrap { width: 76mm; margin: 0 auto; padding: 2.5mm 0; color: #0f172a; }",
+      "      .logo { width: 62px; height: 62px; border-radius: 999px; object-fit: cover; display: block; margin: 0 auto 8px; }",
+      "      .title { text-align: center; font-size: 20px; font-weight: 900; margin: 2px 0; }",
+      "      .meta { text-align: center; font-size: 12px; color: #475569; margin: 2px 0; }",
+      "      .sep { border: 0; border-top: 1px dashed #94a3b8; margin: 8px 0; }",
+      "      .row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; margin: 4px 0; }",
+      "      .tot { font-size: 17px; font-weight: 900; }",
+      "      .small { font-size: 11px; color: #334155; }",
+      "    </style>",
+      "  </head>",
+      "  <body>",
+      "    <div class=\"wrap\">",
+      "      <img class=\"logo\" src=\"{{logoUrl}}\" alt=\"logo\"/>",
+      "      <div class=\"title\">{{restaurantName}}</div>",
+      "      <div class=\"meta\">TICKET FISCAL NACEF</div>",
+      "      <div class=\"meta\">{{createdAt}}</div>",
+      "      <div class=\"meta\">Ticket: {{ticketCode}} - Cmd: {{orderNumber}}</div>",
+      "      <div class=\"meta\">Table: {{tableNumber}} | Serveur: {{serverName}}</div>",
+      "      <hr class=\"sep\"/>",
+      "      {{#each items}}",
+      "      <div class=\"row\"><span>{{this.quantity}} x {{this.name}}</span><span>{{this.total}} {{currency}}</span></div>",
+      "      {{/each}}",
+      "      <hr class=\"sep\"/>",
+      "      <div class=\"row\"><span>Prix HT</span><span>{{subtotal}} {{currency}}</span></div>",
+      "      <div class=\"row\"><span>Remise</span><span>-{{discount}} {{currency}}</span></div>",
+      "      <div class=\"row\"><span>Timbre</span><span>{{timbre}} {{currency}}</span></div>",
+      "      <div class=\"row tot\"><span>Prix TTC</span><span>{{total}} {{currency}}</span></div>",
+      "      <hr class=\"sep\"/>",
+      "      <div class=\"small\">MF: {{taxId}}</div>",
+      "      <div class=\"small\">Paiement: {{amount}} {{currency}}</div>",
+      "      <div class=\"small\">Ref: {{orderRef}}</div>",
+      "      <div class=\"small\" style=\"text-align:center;margin-top:8px\">{{footerText}}</div>",
+      "    </div>",
+      "  </body>",
+      "</html>",
+      "",
+    ].join("\n");
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename=\"client-nacef-template.sample.html\"',
+    );
+    res.send(sample);
+  } catch (err) {
+    console.error('downloadNacefHtmlTemplateSample error:', err);
+    res.status(500).json({ error: (err as any)?.message || 'Server error' });
+  }
+}
+
 export async function downloadPrintTemplatePreview(req: Request, res: Response) {
   try {
     const kindRaw = String(req.query.kind || 'client').trim().toLowerCase();
