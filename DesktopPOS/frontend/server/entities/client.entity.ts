@@ -6,13 +6,13 @@ export class Client {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ type: 'varchar', length: 160 })
   name: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', length: 160, nullable: true })
   email: string;
 
-  @Column()
+  @Column({ type: 'varchar', length: 32 })
   phone: string;
 
   @Column({ type: 'text', nullable: true })

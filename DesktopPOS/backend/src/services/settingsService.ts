@@ -36,14 +36,15 @@ const defaults = {
   applyTimbreToTicket: true,
   applyTimbreToInvoice: true,
   printPreviewOnValidate: false,
-  printRoutingMode: 'LOCAL' as const,
+  printAutoOnPreview: true,
+  printRoutingMode: 'DESKTOP_BRIDGE' as const,
   nacefEnabled: false,
   nacefEnforcementMode: 'SOFT' as const,
   nacefMode: 'SIMULATED' as const,
   nacefImdf: '',
   nacefBaseUrl: 'http://127.0.0.1:10006',
   desktopPrintBridge: {
-    enabled: false,
+    enabled: true,
     url: 'http://127.0.0.1:17888',
     token: '',
     timeoutMs: 4000,
@@ -628,6 +629,7 @@ export async function saveSettings(incomingUpdate: any) {
     applyTimbreToTicket: update?.applyTimbreToTicket ?? existing?.applyTimbreToTicket ?? defaults.applyTimbreToTicket,
     applyTimbreToInvoice: update?.applyTimbreToInvoice ?? existing?.applyTimbreToInvoice ?? defaults.applyTimbreToInvoice,
     printPreviewOnValidate: update?.printPreviewOnValidate ?? existing?.printPreviewOnValidate ?? defaults.printPreviewOnValidate,
+    printAutoOnPreview: update?.printAutoOnPreview ?? existing?.printAutoOnPreview ?? defaults.printAutoOnPreview,
     printRoutingMode: normalizePrintRoutingMode(
       update?.printRoutingMode ??
         (existing as any)?.printRoutingMode ??

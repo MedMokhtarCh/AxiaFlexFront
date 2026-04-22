@@ -11,5 +11,7 @@ router.get('/terminals', saasController.listSaasTerminals);
 router.patch('/terminals/:id', saasController.patchSaasTerminal);
 router.get('/logs', saasController.getDeveloperLogs);
 router.post('/logs', saasController.postDeveloperLog);
+router.post('/maintenance/purge-transactions', saasController.purgeTransactions);
+router.post('/maintenance/reset-minimal', saasController.resetToMinimal);
 
 export default router;

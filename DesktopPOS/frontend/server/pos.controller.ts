@@ -1,11 +1,15 @@
 
 import { Controller, Get, Post, Body, Patch, Param, Delete, UnauthorizedException } from '@nestjs/common';
 import { PosService } from './pos.service';
+import { FiscalService } from './fiscal.service';
 import { OrderStatus } from '../types';
 
 @Controller('pos')
 export class PosController {
-  constructor(private readonly posService: PosService) {}
+  constructor(
+    private readonly posService: PosService,
+    private readonly fiscalService: FiscalService,
+  ) {}
 
   @Get('products')
   getProducts() { return this.posService.getProducts(); }
@@ -44,6 +48,11 @@ export class PosController {
   @Patch('orders/:id/status')
   updateStatus(@Param('id') id: string, @Body('status') status: OrderStatus) {
     return this.posService.updateOrder(id, { status });
+  }
+
+  @Get('orders/:id/fiscal-status')
+  getOrderFiscalStatus(@Param('id') id: string) {
+    return this.fiscalService.getTransactionByOrderId(id);
   }
 
   @Get('session')

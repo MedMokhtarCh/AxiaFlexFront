@@ -2,7 +2,7 @@
   "name": "desktop-pos",
   "version": "0.1.0",
   "private": true,
-  "description": "Application desktop POS (Electron) basee sur Frontend web existant.",
+  "description": "Application Axia Flex Desk (Electron) basee sur Frontend web existant.",
   "main": "main.js",
   "scripts": {
     "setup:oneclick": "powershell -NoProfile -ExecutionPolicy Bypass -File ./setup-desktoppos-oneclick.ps1",
@@ -28,7 +28,7 @@
   },
   "build": {
     "appId": "com.axia.desktoppos",
-    "productName": "Axia Desktop POS",
+    "productName": "Axia Flex Desk",
     "files": [
       "main.js",
       "preload.js",

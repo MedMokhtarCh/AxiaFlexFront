@@ -14,6 +14,6 @@
   <circle cx="32" cy="32" r="22" fill="#0B1120" stroke="#67E8F9" stroke-opacity=".75" stroke-width="2"/>
   <path d="M21 42 L31 21 L41 42 M25 33 H36" stroke="url(#accent)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M41 23 H30 M41 23 V39 M41 31 H34" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="50" cy="50" r="10" fill="#0891B2"/>
-  <text x="50" y="54" text-anchor="middle" font-size="11" font-weight="800" fill="#fff" font-family="Arial, sans-serif">C</text>
+  <circle cx="50" cy="50" r="10" fill="#7E22CE"/>
+  <text x="50" y="54" text-anchor="middle" font-size="11" font-weight="800" fill="#fff" font-family="Arial, sans-serif">P</text>
 </svg>

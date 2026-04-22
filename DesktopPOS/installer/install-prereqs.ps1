@@ -82,9 +82,23 @@ function Ask-DbConfigWinForms {
   $form = New-Object System.Windows.Forms.Form
   $form.Text = "Configuration PostgreSQL"
   $form.StartPosition = "CenterScreen"
-  $form.Width = 520
-  $form.Height = 310
+  $form.Width = 620
+  $form.Height = 390
   $form.TopMost = $true
+
+  $connLabel = New-Object System.Windows.Forms.Label
+  $connLabel.Text = "Chaîne PostgreSQL (optionnel)"
+  $connLabel.Left = 20
+  $connLabel.Top = 20
+  $connLabel.Width = 560
+  $form.Controls.Add($connLabel)
+
+  $connBox = New-Object System.Windows.Forms.TextBox
+  $connBox.Left = 20
+  $connBox.Top = 44
+  $connBox.Width = 560
+  $connBox.Text = "postgresql://postgres:postgres@localhost:5432/posdb"
+  $form.Controls.Add($connBox)
 
   $labels = @("DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME")
   $defaults = @("localhost", "5432", "postgres", "postgres", "posdb")
@@ -94,13 +108,13 @@ function Ask-DbConfigWinForms {
     $lbl = New-Object System.Windows.Forms.Label
     $lbl.Text = $labels[$i]
     $lbl.Left = 20
-    $lbl.Top = 24 + ($i * 38)
+    $lbl.Top = 92 + ($i * 38)
     $lbl.Width = 130
     $form.Controls.Add($lbl)
 
     $tb = New-Object System.Windows.Forms.TextBox
     $tb.Left = 160
-    $tb.Top = 20 + ($i * 38)
+    $tb.Top = 88 + ($i * 38)
     $tb.Width = 320
     $tb.Text = $defaults[$i]
     if ($labels[$i] -eq "DB_PASSWORD") {
@@ -113,7 +127,7 @@ function Ask-DbConfigWinForms {
   $okButton = New-Object System.Windows.Forms.Button
   $okButton.Text = "OK"
   $okButton.Left = 310
-  $okButton.Top = 220
+  $okButton.Top = 300
   $okButton.Width = 80
   $okButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
   $form.Controls.Add($okButton)
@@ -121,7 +135,7 @@ function Ask-DbConfigWinForms {
   $cancelButton = New-Object System.Windows.Forms.Button
   $cancelButton.Text = "Annuler"
   $cancelButton.Left = 400
-  $cancelButton.Top = 220
+  $cancelButton.Top = 300
   $cancelButton.Width = 80
   $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
   $form.Controls.Add($cancelButton)
@@ -131,6 +145,33 @@ function Ask-DbConfigWinForms {
   $result = $form.ShowDialog()
   if ($result -ne [System.Windows.Forms.DialogResult]::OK) {
     throw "Configuration DB annulee par l'utilisateur."
+  }
+
+  $conn = String($connBox.Text || "").Trim()
+  if (-not [string]::IsNullOrWhiteSpace($conn)) {
+    try {
+      $uri = [System.Uri]$conn
+      if ($uri.Scheme -match '^postgres(ql)?$') {
+        $userInfo = String($uri.UserInfo || "")
+        $u = ""
+        $p = ""
+        if ($userInfo.Contains(":")) {
+          $parts = $userInfo.Split(":", 2)
+          $u = [System.Uri]::UnescapeDataString($parts[0])
+          $p = [System.Uri]::UnescapeDataString($parts[1])
+        } else {
+          $u = [System.Uri]::UnescapeDataString($userInfo)
+        }
+        $dbFromPath = String($uri.AbsolutePath || "").Trim("/")
+        if (-not [string]::IsNullOrWhiteSpace($uri.Host)) { $textBoxes["DB_HOST"].Text = $uri.Host }
+        if ($uri.Port -gt 0) { $textBoxes["DB_PORT"].Text = String($uri.Port) }
+        if (-not [string]::IsNullOrWhiteSpace($u)) { $textBoxes["DB_USER"].Text = $u }
+        if (-not [string]::IsNullOrWhiteSpace($p)) { $textBoxes["DB_PASSWORD"].Text = $p }
+        if (-not [string]::IsNullOrWhiteSpace($dbFromPath)) { $textBoxes["DB_NAME"].Text = $dbFromPath }
+      }
+    } catch {
+      throw "Chaîne de connexion PostgreSQL invalide."
+    }
   }
 
   return @{
@@ -143,75 +184,10 @@ function Ask-DbConfigWinForms {
 }
 
 function Ask-AdminConfigWinForms {
-  Add-Type -AssemblyName System.Windows.Forms
-  Add-Type -AssemblyName System.Drawing
-
-  $form = New-Object System.Windows.Forms.Form
-  $form.Text = "Configuration Admin"
-  $form.StartPosition = "CenterScreen"
-  $form.Width = 460
-  $form.Height = 220
-  $form.TopMost = $true
-
-  $nameLabel = New-Object System.Windows.Forms.Label
-  $nameLabel.Text = "Nom admin"
-  $nameLabel.Left = 20
-  $nameLabel.Top = 24
-  $nameLabel.Width = 120
-  $form.Controls.Add($nameLabel)
-
-  $nameBox = New-Object System.Windows.Forms.TextBox
-  $nameBox.Left = 150
-  $nameBox.Top = 20
-  $nameBox.Width = 280
-  $nameBox.Text = "Admin"
-  $form.Controls.Add($nameBox)
-
-  $pinLabel = New-Object System.Windows.Forms.Label
-  $pinLabel.Text = "PIN admin (4-8 chiffres)"
-  $pinLabel.Left = 20
-  $pinLabel.Top = 68
-  $pinLabel.Width = 140
-  $form.Controls.Add($pinLabel)
-
-  $pinBox = New-Object System.Windows.Forms.TextBox
-  $pinBox.Left = 150
-  $pinBox.Top = 64
-  $pinBox.Width = 280
-  $pinBox.Text = "1234"
-  $pinBox.UseSystemPasswordChar = $true
-  $form.Controls.Add($pinBox)
-
-  $okButton = New-Object System.Windows.Forms.Button
-  $okButton.Text = "OK"
-  $okButton.Left = 260
-  $okButton.Top = 120
-  $okButton.Width = 80
-  $okButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
-  $form.Controls.Add($okButton)
-
-  $cancelButton = New-Object System.Windows.Forms.Button
-  $cancelButton.Text = "Annuler"
-  $cancelButton.Left = 350
-  $cancelButton.Top = 120
-  $cancelButton.Width = 80
-  $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-  $form.Controls.Add($cancelButton)
-
-  $form.AcceptButton = $okButton
-  $form.CancelButton = $cancelButton
-  $result = $form.ShowDialog()
-  if ($result -ne [System.Windows.Forms.DialogResult]::OK) {
-    throw "Configuration Admin annulee par l'utilisateur."
-  }
-
-  $pin = String($pinBox.Text || "1234").Trim()
-  if ($pin -notmatch '^\d{4,8}$') {
-    throw "PIN admin invalide. Utiliser 4 a 8 chiffres."
-  }
+  # Installation requirement: create default admin account with PIN 1234.
   return @{
-    adminName = String($nameBox.Text || "Admin").Trim()
-    adminPin = $pin
+    adminName = "Admin"
+    adminPin = "1234"
   }
 }
 

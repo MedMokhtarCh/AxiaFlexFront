@@ -423,10 +423,19 @@ async function previewPdfFile(pdfPath) {
 
 async function previewHtmlPrintDialog(browserPath, htmlPath) {
   const fileUrl = pathToFileURL(String(htmlPath || "")).toString();
-  await execFileAsync(browserPath, [
-    "--new-window",
-    "--disable-features=msEdgeSidebarV2",
-    fileUrl,
+  const escBrowser = String(browserPath || "").replace(/'/g, "''");
+  const escUrl = String(fileUrl || "").replace(/'/g, "''");
+  await execFileAsync("powershell", [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    [
+      `$p = Start-Process -FilePath '${escBrowser}' -ArgumentList '--new-window','--disable-features=msEdgeSidebarV2','${escUrl}' -PassThru`,
+      "Start-Sleep -Milliseconds 400",
+      "$ws = New-Object -ComObject WScript.Shell",
+      "try { [void]$ws.AppActivate($p.Id) } catch { }",
+    ].join("; "),
   ]);
 }
 
@@ -434,7 +443,10 @@ async function printHtmlBase64(printerName, htmlBase64) {
   const tmpHtml = path.join(os.tmpdir(), `axiaprinters-print-${Date.now()}.html`);
   const tmpPdf = path.join(os.tmpdir(), `axiaprinters-print-${Date.now()}.pdf`);
   const rawHtml = Buffer.from(String(htmlBase64 || ""), "base64").toString("utf8");
-  const normalizedHtml = normalizeHtmlForCloudPrint(rawHtml, PAPER_WIDTH_MM === 50 ? 384 : 576);
+  const normalizedHtml =
+    PRINT_DELIVERY_MODE === "pdf_preview"
+      ? normalizeHtmlForBrowserPreview(rawHtml)
+      : normalizeHtmlForCloudPrint(rawHtml, PAPER_WIDTH_MM === 50 ? 384 : 576);
   await fs.writeFile(tmpHtml, Buffer.from(normalizedHtml, "utf8"));
   try {
     const browserPath = await resolveBrowserPath();
@@ -443,6 +455,9 @@ async function printHtmlBase64(printerName, htmlBase64) {
     }
     if (PRINT_DELIVERY_MODE === "pdf_preview") {
       await previewHtmlPrintDialog(browserPath, tmpHtml);
+      setTimeout(() => {
+        fs.unlink(tmpHtml).catch(() => undefined);
+      }, 10 * 60 * 1000);
       return;
     }
     try {
@@ -458,7 +473,9 @@ async function printHtmlBase64(printerName, htmlBase64) {
       await printPdfFile(printerName, tmpPdf);
     }
   } finally {
-    await fs.unlink(tmpHtml).catch(() => undefined);
+    if (PRINT_DELIVERY_MODE !== "pdf_preview") {
+      await fs.unlink(tmpHtml).catch(() => undefined);
+    }
     if (PRINT_DELIVERY_MODE !== "pdf_preview") {
       await fs.unlink(tmpPdf).catch(() => undefined);
     }
@@ -521,6 +538,43 @@ ${nacefBoostStyle}
 </style>`;
   if (/<\/head>/i.test(out)) return out.replace(/<\/head>/i, `${forceStyle}</head>`);
   return `${forceStyle}${out}`;
+}
+
+function normalizeHtmlForBrowserPreview(html) {
+  let out = String(html || "");
+  out = out.replace(/<div[^>]*class=["'][^"']*\bnotice\b[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, "");
+  const previewStyle = `
+<style id="axiaprinters-preview-print-style">
+@page{size:80mm auto;margin:0}
+html,body{margin:0 !important;padding:0 !important;background:#fff !important}
+body{
+  width:80mm !important;
+  max-width:80mm !important;
+  margin:0 auto !important;
+  overflow:visible !important;
+}
+.wrap,.card,.container,.ticket,.receipt{
+  width:76mm !important;
+  max-width:76mm !important;
+  margin:0 auto !important;
+}
+.card{padding:10px !important}
+.meta{font-size:12px !important;line-height:1.6 !important}
+.line{font-size:13px !important;margin-bottom:3px !important}
+.tot{font-size:13px !important;line-height:2 !important}
+.tot.ttc{font-size:20px !important}
+.fiscal{font-size:13px !important;line-height:1.6 !important}
+.qr{display:block !important;text-align:center !important;margin-top:10px !important}
+.qr img{
+  width:280px !important;
+  height:280px !important;
+  display:block !important;
+  margin:8px auto 0 auto !important;
+}
+.qr p{font-size:12px !important;text-align:center !important}
+</style>`;
+  if (/<\/head>/i.test(out)) return out.replace(/<\/head>/i, `${previewStyle}</head>`);
+  return `${previewStyle}${out}`;
 }
 
 async function resolvePrinterNameForJob(job, payload) {

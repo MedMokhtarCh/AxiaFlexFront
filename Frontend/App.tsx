@@ -374,10 +374,15 @@ const MainLayout: React.FC = () => {
   /** Ouvre le modal « Règlement » du POS après sélection table avec commande (même UI que caisse). */
   const [openPaymentAfterTableSelect, setOpenPaymentAfterTableSelect] =
     useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (currentUser?.role === Role.SERVER) setActiveTab("pos");
+    else if (
+      currentUser?.role === Role.CHEF ||
+      currentUser?.role === Role.BARTENDER
+    )
+      setActiveTab("kds");
     else if (currentUser?.role === Role.STOCK_MANAGER)
       setActiveTab("inventory");
   }, [currentUser]);
@@ -387,6 +392,16 @@ const MainLayout: React.FC = () => {
   const isShop =
     companyType === CompanyType.SHOP_SINGLE || companyType === CompanyType.SHOP_MULTI;
   const isRestaurantCafe = companyType === CompanyType.RESTAURANT_CAFE;
+
+  useEffect(() => {
+    if (
+      (currentUser?.role === Role.CHEF ||
+        currentUser?.role === Role.BARTENDER) &&
+      activeTab !== "kds"
+    ) {
+      setActiveTab("kds");
+    }
+  }, [activeTab, currentUser?.role]);
 
   useEffect(() => {
     if (activeTab === "tables" && !isRestaurantCafe) {

@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import posRouter from './routes/pos.js';
 import saasRouter from './routes/saas.js';
+import fiscalRouter from './routes/fiscal.js';
 import swaggerUi from 'swagger-ui-express';
 import swaggerSpec from './swagger.js';
 import path from 'path';
@@ -82,6 +83,7 @@ export function createApp() {
   
   app.use('/pos', posRouter);
   app.use('/saas', saasRouter);
+  app.use('/fiscal', fiscalRouter);
   app.get('/sic/external/manifest', nacefController.externalGetManifest);
   app.post('/sic/external/certificate/request', nacefController.externalRequestCertificate);
   app.post('/sic/external/sync/request', nacefController.externalSyncRequest);

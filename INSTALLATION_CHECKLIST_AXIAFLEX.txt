@@ -1,0 +1,115 @@
+CHECKLIST INSTALLATION - AXIA FLEX (Cloud / Desk / Print)
+Version: 1.0
+
+============================================================
+1) VERSIONS RECOMMANDEES
+============================================================
+- Node.js: 20 LTS
+- PostgreSQL: 16 (15 compatible si necessaire)
+- npm: version incluse avec Node.js 20
+
+============================================================
+2) PREREQUIS WINDOWS (A INSTALLER UNE SEULE FOIS)
+============================================================
+- Windows 10/11 64-bit
+- Microsoft Edge / WebView2 Runtime
+- Microsoft Visual C++ Redistributable 2015-2022 (x64)
+- Pilotes imprimantes installes (si usage Axia Flex Print)
+- Synchronisation heure/date active (NTP)
+- Pare-feu autorisant les ports utilises par l'application
+
+============================================================
+3) ORDRE D'INSTALLATION CONSEILLE
+============================================================
+1. Axia Flex Cloud (serveur)
+2. Axia Flex Desk (poste caisse)
+3. Axia Flex Print (agent impression)
+
+============================================================
+4) ETAPES - AXIA FLEX CLOUD
+============================================================
+[ ] Installer Node.js 20 LTS
+[ ] Installer PostgreSQL 16
+[ ] Creer la base de donnees
+[ ] Creer un utilisateur DB dedie
+[ ] Configurer .env backend
+[ ] Demarrer Backend
+[ ] Verifier endpoint /health
+[ ] Demarrer Frontend
+[ ] Verifier acces application web
+
+Variables .env backend (minimum):
+- DB_HOST=
+- DB_PORT=5432
+- DB_USER=
+- DB_PASSWORD=
+- DB_NAME=
+- DATABASE_URL= (optionnel, mais recommande)
+
+Exemple DATABASE_URL:
+postgresql://axia_user:motdepasse@127.0.0.1:5432/axiaflex
+
+============================================================
+5) ETAPES - AXIA FLEX DESK
+============================================================
+[ ] Lancer l'installateur Axia Flex Desk
+[ ] A l'etape DB, saisir:
+    - Soit la chaine de connexion PostgreSQL complete
+    - Soit host / port / user / password / db
+[ ] Finaliser l'installation
+[ ] Ouvrir l'application
+[ ] Tester connexion et chargement ecrans
+[ ] Verifier profils/rles:
+    - Chef/Barman: KDS uniquement
+    - Serveur/Caissier/Admin: selon droits configures
+
+============================================================
+6) ETAPES - AXIA FLEX PRINT
+============================================================
+[ ] Lancer l'installateur Axia Flex Print
+[ ] Configurer:
+    - URL Cloud API
+    - Agent token
+    - Alias terminal
+    - Site
+    - Mode impression (Cloud/Local selon besoin)
+[ ] Verifier detection imprimantes
+[ ] Verifier terminal online dans settings/super admin
+[ ] Faire un test impression ticket
+
+============================================================
+7) TESTS FONCTIONNELS MINIMAUX
+============================================================
+[ ] Creer commande test
+[ ] Envoyer ticket cuisine/bar
+[ ] Changer statut KDS (demarrer puis marquer pret)
+[ ] Encaisser commande
+[ ] Imprimer ticket client
+[ ] Verifier qu'il n'y a pas d'erreurs 401/403/500
+
+============================================================
+8) SQL UTILE (EXEMPLE CREATION DB)
+============================================================
+CREATE DATABASE axiaflex;
+CREATE USER axia_user WITH ENCRYPTED PASSWORD 'motdepassefort';
+GRANT ALL PRIVILEGES ON DATABASE axiaflex TO axia_user;
+
+============================================================
+9) NOTES TECHNICIEN
+============================================================
+Site/Client:
+Date:
+Technicien:
+
+URL Backend:
+URL Frontend:
+DB Host:
+DB Name:
+Terminal Alias:
+Imprimante principale:
+
+Observations:
+- 
+- 
+- 
+

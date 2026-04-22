@@ -3,6 +3,7 @@ import * as nacefService from './nacefService.js';
 import { AppDataSource } from '../data-source.js';
 import { TicketItem } from '../entity/TicketItem.js';
 import { Product } from '../entity/Product.js';
+import { createHash } from 'crypto';
 
 type ProductTaxMeta = { rate: number; code: string };
 type FiscalLine = {
@@ -26,6 +27,10 @@ function parseAmount(value: unknown) {
 
 function toFixed3(value: unknown) {
   return parseAmount(value).toFixed(3);
+}
+
+function toNumberFixed3(value: unknown) {
+  return Number(toFixed3(value));
 }
 
 function resolveLineTaxRate(line: any, defaultRate: number) {
@@ -136,6 +141,38 @@ function resolveImdf(settings: any) {
   return String(settings?.nacefImdf || '').trim().toUpperCase();
 }
 
+async function ensureManifestReadyForSigning(imdf: string, settings: any) {
+  const autoBootstrap =
+    String((process.env as Record<string, string | undefined>)['NACEF_AUTO_BOOTSTRAP'] || '1').trim() !== '0';
+  if (!autoBootstrap) {
+    return nacefService.getManifest(imdf);
+  }
+  const mode = String(settings?.nacefMode || 'SIMULATED').trim().toUpperCase();
+  let manifest: any = await nacefService.getManifest(imdf);
+  if (manifest?.canSign) return manifest;
+
+  // Automatic bootstrap is safe only in simulated mode.
+  if (mode !== 'SIMULATED') {
+    return manifest;
+  }
+
+  const certStatus = String(manifest?.certificateInfo?.certRequestStatus || '').toUpperCase();
+  if (certStatus === 'NOT_REQUESTED') {
+    await nacefService.requestCertificate(imdf);
+    manifest = await nacefService.getManifest(imdf);
+  }
+  const certStatusAfterRequest = String(manifest?.certificateInfo?.certRequestStatus || '').toUpperCase();
+  if (certStatusAfterRequest !== 'CERTIFICATE_GENERATED') {
+    await nacefService.markCertificateGenerated(imdf, 365);
+    manifest = await nacefService.getManifest(imdf);
+  }
+  if (String(manifest?.status || '').toUpperCase() !== 'SYNCHRONIZED') {
+    await nacefService.synchronize(imdf, 'ONLINE');
+    manifest = await nacefService.getManifest(imdf);
+  }
+  return manifest;
+}
+
 function resolveEnforcementMode(settings: any): 'SOFT' | 'HARD' {
   const raw = String(settings?.nacefEnforcementMode || 'SOFT').trim().toUpperCase();
   return raw === 'HARD' ? 'HARD' : 'SOFT';
@@ -155,45 +192,48 @@ function buildFullOrderQrPayload(args: {
   signedTicket?: any;
 }) {
   const { ticket, settings, imdf, payload, fiscalLines, taxBreakdown, nacefTicket, signedTicket } = args;
+  const mf = String((settings as any)?.taxId || '').trim() || String(imdf || '');
+  const pos = String((settings as any)?.terminalId || 'POS01').trim() || 'POS01';
+  const ticketCode = String(ticket?.code || ticket?.id || '');
+  const createdAtIso = new Date(Number(ticket?.createdAt || Date.now())).toISOString();
+  const signature = String((signedTicket as any)?.signature || '');
+  const ttc = toNumberFixed3(payload?.totalTtc || 0);
+  const ht = toNumberFixed3(payload?.totalHt || 0);
+  const tva = toNumberFixed3(payload?.taxTotal || 0);
+
+  // Canonical payload for stable hash generation.
+  const canonicalPayload = {
+    mf,
+    pos,
+    ticket: ticketCode,
+    date: createdAtIso,
+    ttc,
+    ht,
+    tva,
+    signature,
+  };
+  const hashSeed = JSON.stringify({
+    mf: canonicalPayload.mf,
+    pos: canonicalPayload.pos,
+    ticket: canonicalPayload.ticket,
+    date: canonicalPayload.date,
+    ttc: canonicalPayload.ttc,
+    ht: canonicalPayload.ht,
+    tva: canonicalPayload.tva,
+    signature: canonicalPayload.signature,
+  });
+  const hash = createHash('sha256').update(hashSeed).digest('hex').toUpperCase().slice(0, 32);
+
   return JSON.stringify({
-    schema: 'NACEF_ORDER_QR_V1',
-    ticketCode: String(ticket?.code || ticket?.id || ''),
-    issuedAt: Number(ticket?.createdAt || Date.now()),
-    imdf: String(imdf || ''),
-    restaurant: {
-      name: String((settings as any)?.restaurantName || ''),
-      taxId: String((settings as any)?.taxId || ''),
-      currency: String((settings as any)?.currency || 'DT'),
-    },
-    sale: {
-      operationType: String(payload?.operationType || 'SALE'),
-      transactionType: String(payload?.transactionType || 'NORMAL'),
-      totalHt: String(payload?.totalHt || '0.000'),
-      taxTotal: String(payload?.taxTotal || '0.000'),
-      totalTtc: String(payload?.totalTtc || '0.000'),
-      taxRate: String(payload?.taxRate || '0.000'),
-      taxBreakdown,
-    },
-    lines: fiscalLines.map((line) => ({
-      lineNo: line.lineNo,
-      productId: line.productId,
-      name: line.name,
-      quantity: line.quantity,
-      unitPriceHt: line.unitPriceHt,
-      lineHt: line.lineHt,
-      lineTax: line.lineTax,
-      lineTtc: line.lineTtc,
-      taxRate: line.taxRate,
-      taxCode: line.taxCode,
-      familyCode: line.familyCode,
-    })),
-    nacef: {
-      transactionId: String(nacefTicket?.transaction?.id || payload?.id || ''),
-      transactionTimestamp: String(nacefTicket?.transaction?.timestamp || ''),
-      mode: String((signedTicket as any)?.mode || ''),
-      signature: String((signedTicket as any)?.signature || ''),
-      officialQr: String((signedTicket as any)?.qrCodePayload || ''),
-    },
+    mf: canonicalPayload.mf,
+    pos: canonicalPayload.pos,
+    ticket: canonicalPayload.ticket,
+    date: canonicalPayload.date,
+    ttc: canonicalPayload.ttc,
+    ht: canonicalPayload.ht,
+    tva: canonicalPayload.tva,
+    signature: canonicalPayload.signature,
+    hash,
   });
 }
 
@@ -415,6 +455,9 @@ export async function maybeFiscalizeTicket(ticket: any) {
     transactionType,
   });
   (ticket as any).fiscalPayloadJson = JSON.stringify(nacefTicket);
+
+  // Ensure fiscal module is ready automatically for frontend-driven orders.
+  await ensureManifestReadyForSigning(imdf, settings);
 
   const signed = await nacefService.signTicket(imdf, payload);
   (ticket as any).fiscalImdf = imdf;

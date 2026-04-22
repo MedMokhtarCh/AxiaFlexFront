@@ -301,35 +301,59 @@ const KitchenDisplay: React.FC = () => {
     };
   }, [sortedEntries]);
 
-  const applyItemPrepStep = useCallback(
-    async (order: Order, allItems: OrderItem[], itemId: string) => {
-      const target = allItems.find((i) => i.id === itemId);
-      if (!target) return;
-      const station = resolveItemStation(target, productsById, printersById);
-      if (
-        !canStaffActOnKdsItem(
-          target,
+  const applyOrderPrepStep = useCallback(
+    async (order: Order, allItems: OrderItem[], visibleItems: OrderItem[]) => {
+      const actionableItems = (visibleItems || []).filter((it) =>
+        canStaffActOnKdsItem(
+          it,
           role,
           isFullTicketRole,
           printers,
           productsById,
           printersById,
-        )
-      )
-        return;
-      const current = prepOfItem(target);
-      const next =
-        role === Role.SERVER && current === OrderStatus.READY
-          ? OrderStatus.DELIVERED
-          : nextPrepStatus(current);
-      if (!next) return;
+        ),
+      );
+      if (!actionableItems.length) return;
+
+      const canCommandLevelAction =
+        role === Role.CHEF ||
+        role === Role.BARTENDER ||
+        role === Role.ADMIN ||
+        isFullTicketRole;
+      if (!canCommandLevelAction) return;
+
+      const hasPending = actionableItems.some(
+        (it) => prepOfItem(it) === OrderStatus.PENDING,
+      );
+      const hasPreparing = actionableItems.some(
+        (it) => prepOfItem(it) === OrderStatus.PREPARING,
+      );
+      const fromStatus = hasPending
+        ? OrderStatus.PENDING
+        : hasPreparing
+          ? OrderStatus.PREPARING
+          : null;
+      const toStatus = hasPending
+        ? OrderStatus.PREPARING
+        : hasPreparing
+          ? OrderStatus.READY
+          : null;
+      if (!fromStatus || !toStatus) return;
+
+      const targetIds = new Set(
+        actionableItems
+          .filter((it) => prepOfItem(it) === fromStatus)
+          .map((it) => it.id),
+      );
+      if (!targetIds.size) return;
 
       const updatedItems = allItems.map((it) => {
-        if (it.id !== itemId) return it;
+        if (!targetIds.has(it.id)) return it;
+        const st = resolveItemStation(it, productsById, printersById);
         return {
           ...it,
-          prepStatus: next,
-          station: it.station ?? station,
+          prepStatus: toStatus,
+          station: it.station ?? st,
         };
       });
       const nextOrderStatus = computeOrderPrepStatus(updatedItems);
@@ -465,11 +489,53 @@ const KitchenDisplay: React.FC = () => {
                     {order.serverName ? ` · ${order.serverName}` : ""}
                   </p>
                 </div>
-                <div className="flex items-center gap-1.5 text-slate-400 shrink-0">
-                  <Clock size={14} />
-                  <span className="text-[10px] font-black tabular-nums">
-                    {formatElapsed(order.createdAt)}
-                  </span>
+                <div className="flex flex-col items-end gap-2 shrink-0">
+                  <div className="flex items-center gap-1.5 text-slate-400">
+                    <Clock size={14} />
+                    <span className="text-[10px] font-black tabular-nums">
+                      {formatElapsed(order.createdAt)}
+                    </span>
+                  </div>
+                  {(() => {
+                    const actionableItems = items.filter((it) =>
+                      canStaffActOnKdsItem(
+                        it,
+                        role,
+                        isFullTicketRole,
+                        printers,
+                        productsById,
+                        printersById,
+                      ),
+                    );
+                    const canCommandLevelAction =
+                      role === Role.CHEF ||
+                      role === Role.BARTENDER ||
+                      role === Role.ADMIN ||
+                      isFullTicketRole;
+                    const hasPending = actionableItems.some(
+                      (it) => prepOfItem(it) === OrderStatus.PENDING,
+                    );
+                    const hasPreparing = actionableItems.some(
+                      (it) => prepOfItem(it) === OrderStatus.PREPARING,
+                    );
+                    const actionLabel =
+                      canCommandLevelAction && hasPending
+                        ? "Démarrer commande"
+                        : canCommandLevelAction && hasPreparing
+                          ? "Marquer prêt (commande)"
+                          : "";
+                    const canTap = actionLabel.length > 0;
+                    if (!canTap) return null;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => applyOrderPrepStep(order, allItems, items)}
+                        className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-wide whitespace-nowrap bg-slate-900 text-white hover:bg-indigo-600 transition-colors min-h-10"
+                      >
+                        {actionLabel}
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -481,28 +547,6 @@ const KitchenDisplay: React.FC = () => {
                     printersById,
                   );
                   const p = prepOfItem(item);
-                  const next =
-                    role === Role.SERVER && p === OrderStatus.READY
-                      ? OrderStatus.DELIVERED
-                      : nextPrepStatus(p);
-                  const canTap =
-                    canStaffActOnKdsItem(
-                      item,
-                      role,
-                      isFullTicketRole,
-                      printers,
-                      productsById,
-                      printersById,
-                    ) && next !== null;
-                  const actionLabel =
-                    p === OrderStatus.PENDING
-                      ? "Démarrer"
-                      : p === OrderStatus.PREPARING
-                        ? "Marquer prêt"
-                        : role === Role.SERVER && p === OrderStatus.READY
-                          ? "Servi (article)"
-                        : "—";
-
                   return (
                     <div
                       key={item.id}
@@ -543,20 +587,6 @@ const KitchenDisplay: React.FC = () => {
                         <span className="text-sm font-black text-slate-700 tabular-nums">
                           ×{item.quantity}
                         </span>
-                        <button
-                          type="button"
-                          disabled={!canTap}
-                          onClick={() =>
-                            applyItemPrepStep(order, allItems, item.id)
-                          }
-                          className={`px-3 py-2.5 rounded-lg text-[10px] sm:text-[9px] font-black uppercase tracking-wide whitespace-nowrap transition-colors min-h-11 ${
-                            canTap
-                              ? "bg-slate-900 text-white hover:bg-indigo-600"
-                              : "bg-slate-200 text-slate-400 cursor-not-allowed"
-                          }`}
-                        >
-                          {actionLabel}
-                        </button>
                       </div>
                     </div>
                   );

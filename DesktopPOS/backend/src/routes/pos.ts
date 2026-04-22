@@ -25,6 +25,7 @@ import * as agentController from '../controllers/agentController.js';
 import * as preorderController from '../controllers/preorderController.js';
 import * as trainingProgressController from '../controllers/trainingProgressController.js';
 import * as nacefController from '../controllers/nacefController.js';
+import * as fiscalController from '../controllers/fiscalController.js';
 
 const router = Router();
 
@@ -68,6 +69,7 @@ router.patch('/orders/:id/status', orderController.patchOrderStatus);
 router.post('/orders/:id/payments', orderController.addOrderPayment);
 router.post('/orders/:id/payments/batch', orderController.addOrderPaymentsBatch);
 router.post('/orders/:id/print-client-receipt', orderController.printClientReceiptProvisional);
+router.get('/orders/:id/fiscal-status', fiscalController.getOrderFiscalStatus);
 router.get('/orders/:id/tickets', ticketController.listTickets);
 router.post('/orders/:id/tickets', ticketController.createTicket);
 router.post('/tickets/:id/print', ticketController.print);
@@ -167,6 +169,7 @@ router.get('/settings/pdf-archives/download', settingsController.downloadPdfArch
 router.get('/settings/migration-reports', settingsController.listMigrationReports);
 router.get('/settings/migration-reports/latest', settingsController.getLatestMigrationReport);
 router.get('/settings/client-receipt-template/sample', settingsController.downloadClientReceiptTemplateSample);
+router.get('/settings/client-receipt-template/nacef-html', settingsController.downloadNacefHtmlTemplateSample);
 router.get('/settings/print-template/preview', settingsController.downloadPrintTemplatePreview);
 router.get('/settings/desktop-bridge/test', settingsController.testDesktopBridge);
 router.get('/settings/security-status', settingsController.getSecurityOperationalStatus);
@@ -204,6 +207,7 @@ router.post('/agent/printers', agentController.updateAgentPrinters);
 router.get('/agent/jobs/pull', agentController.pullAgentJobs);
 router.post('/agent/jobs/:id/ack', agentController.ackAgentJob);
 router.get('/terminals', agentController.listTerminals);
+router.delete('/terminals/:id', agentController.deleteTerminal);
 router.patch('/printers/:id/bind-terminal', agentController.bindPrinterToTerminal);
 
 router.get('/stock/movements', stockController.listMovements);

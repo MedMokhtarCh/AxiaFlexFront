@@ -96,6 +96,7 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
     allUsers,
     createTicket,
     printTicket,
+    printOrderClientReceiptProvisional,
     downloadTicketPdf,
     getAvailableStockLots,
   } = usePOS();
@@ -138,6 +139,8 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
   const scannerLastTsRef = useRef(0);
   const shouldAutoFocusPaymentRef = useRef(false);
   const initialPaymentIntentConsumedRef = useRef(false);
+  const autoPrintedTicketRef = useRef<string | null>(null);
+  const autoPrintedProvisionalOrderRef = useRef<string | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelAdminPin, setCancelAdminPin] = useState("");
 
@@ -1055,6 +1058,55 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
     kitchenBarPreview.kitchenItems.length,
     kitchenBarPreview.barItems.length,
     showClientTicketPreview,
+  ]);
+
+  // Keep preview in the same window, but trigger printing automatically once.
+  useEffect(() => {
+    if (!showTicketModal) return;
+    if (!showClientTicketPreview) return;
+    if ((settings as any)?.printAutoOnPreview === false) return;
+    if (completedTicketId) {
+      if (autoPrintedTicketRef.current === completedTicketId) return;
+      autoPrintedTicketRef.current = completedTicketId;
+      void printTicketCopies(completedTicketId)
+        .then(() => {
+          notifySuccess("Impression automatique envoyee a l'imprimante configuree.");
+        })
+        .catch((e: any) => {
+          notifyError(
+            e?.message
+              ? `Impression auto: ${String(e.message)}`
+              : "Impossible de lancer l'impression automatique",
+          );
+        });
+      return;
+    }
+
+    if (ticketPreviewMode !== "ORDER_ONLY") return;
+    const provisionalOrderId = String(completedOrder?.id || "").trim();
+    if (!provisionalOrderId) return;
+    if (autoPrintedProvisionalOrderRef.current === provisionalOrderId) return;
+    autoPrintedProvisionalOrderRef.current = provisionalOrderId;
+    void printOrderClientReceiptProvisional(provisionalOrderId)
+      .then(() => {
+        notifySuccess("Impression automatique du ticket provisoire envoyee.");
+      })
+      .catch((e: any) => {
+        notifyError(
+          e?.message
+            ? `Impression auto: ${String(e.message)}`
+            : "Impossible de lancer l'impression automatique",
+        );
+      });
+  }, [
+    showTicketModal,
+    showClientTicketPreview,
+    completedTicketId,
+    ticketPreviewMode,
+    completedOrder?.id,
+    printTicketCopies,
+    printOrderClientReceiptProvisional,
+    settings,
   ]);
 
   const updateMixedPayment = (
@@ -2983,7 +3035,7 @@ const OrderScreen: React.FC<OrderScreenProps> = ({
                 }}
                 className="w-full bg-slate-100 text-slate-900 font-black py-3.5 rounded-xl text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all mb-2"
               >
-                Imprimer Ticket ({Math.max(1, Number(settings.clientTicketPrintCopies || 1))}x)
+                Reimprimer Ticket ({Math.max(1, Number(settings.clientTicketPrintCopies || 1))}x)
               </button>
               ) : null}
               <button

@@ -59,6 +59,10 @@ export class RestaurantSettings {
   @Column('boolean', { default: false })
   printPreviewOnValidate!: boolean;
 
+  /** Impression automatique quand l'aperçu ticket est ouvert dans l'UI. */
+  @Column('boolean', { default: true })
+  printAutoOnPreview!: boolean;
+
   /** Routage impression: LOCAL, CLOUD (agent AppWin) ou DESKTOP_BRIDGE (app locale dédiée). */
   @Column('varchar', { length: 16, default: 'LOCAL' })
   printRoutingMode!: 'LOCAL' | 'CLOUD' | 'DESKTOP_BRIDGE';

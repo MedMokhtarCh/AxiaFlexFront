@@ -1,16 +1,34 @@
 import { Request, Response } from 'express';
 import * as saas from '../services/saasLicenseService.js';
 import type { SaasLicenseAdminDto } from '../services/saasLicenseService.js';
-import * as settingsService from '../services/settingsService.js';
 import * as fileLog from '../services/fileAuditLogService.js';
 import * as agentService from '../services/agentService.js';
 import { AppDataSource } from '../data-source.js';
 import { TerminalNode } from '../entity/TerminalNode.js';
+import { Order } from '../entity/Order.js';
+import { OrderItem } from '../entity/OrderItem.js';
+import { Ticket } from '../entity/Ticket.js';
+import { TicketItem } from '../entity/TicketItem.js';
+import { Payment } from '../entity/Payment.js';
+import { PaymentItem } from '../entity/PaymentItem.js';
+import { Invoice } from '../entity/Invoice.js';
+import { PrintJob } from '../entity/PrintJob.js';
+import { User } from '../entity/User.js';
+import { RestaurantSettings } from '../entity/RestaurantSettings.js';
+import * as settingsService from '../services/settingsService.js';
 
 function bearer(req: Request): string | undefined {
   const h = req.headers.authorization || '';
   const m = String(h).match(/^Bearer\s+(.+)$/i);
   return m ? m[1].trim() : undefined;
+}
+
+function quoteIdent(value: string): string {
+  return `"${String(value || '').replace(/"/g, '""')}"`;
+}
+
+function getTableName(entity: any): string {
+  return AppDataSource.getRepository(entity).metadata.tableName;
 }
 
 export async function verifySuperAdmin(req: Request, res: Response) {
@@ -253,6 +271,131 @@ export async function postDeveloperLog(req: Request, res: Response) {
       meta: (req.body || {}).meta,
     });
     return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ error: (e as any)?.message || 'Server error' });
+  }
+}
+
+export async function purgeTransactions(req: Request, res: Response) {
+  try {
+    if (!saas.verifySaasSessionToken(bearer(req))) {
+      return res.status(401).json({ error: 'Session Super Admin requise.' });
+    }
+
+    const tableNames = [
+      getTableName(PaymentItem),
+      getTableName(Payment),
+      getTableName(TicketItem),
+      getTableName(Ticket),
+      getTableName(OrderItem),
+      getTableName(Order),
+      getTableName(Invoice),
+      getTableName(PrintJob),
+    ];
+    const uniqueTables = Array.from(new Set(tableNames));
+    const tableSql = uniqueTables.map((t) => quoteIdent(t)).join(', ');
+    if (tableSql) {
+      await AppDataSource.query(
+        `TRUNCATE TABLE ${tableSql} RESTART IDENTITY CASCADE`,
+      );
+    }
+
+    try {
+      await fileLog.appendAuditLine('developer', {
+        action: 'maintenance_purge_transactions',
+        tables: uniqueTables,
+      });
+    } catch {
+      /* ignore */
+    }
+
+    return res.json({
+      ok: true,
+      message: 'Commandes, tickets et paiements supprimés.',
+      tables: uniqueTables,
+    });
+  } catch (e) {
+    return res.status(500).json({ error: (e as any)?.message || 'Server error' });
+  }
+}
+
+export async function resetToMinimal(req: Request, res: Response) {
+  try {
+    if (!saas.verifySaasSessionToken(bearer(req))) {
+      return res.status(401).json({ error: 'Session Super Admin requise.' });
+    }
+
+    await AppDataSource.transaction(async (manager) => {
+      const tableNames = [
+        getTableName(PaymentItem),
+        getTableName(Payment),
+        getTableName(TicketItem),
+        getTableName(Ticket),
+        getTableName(OrderItem),
+        getTableName(Order),
+        getTableName(Invoice),
+        getTableName(PrintJob),
+      ];
+      const uniqueTables = Array.from(new Set(tableNames));
+      const tableSql = uniqueTables.map((t) => quoteIdent(t)).join(', ');
+      if (tableSql) {
+        await manager.query(
+          `TRUNCATE TABLE ${tableSql} RESTART IDENTITY CASCADE`,
+        );
+      }
+
+      const userRepo = manager.getRepository(User);
+      const allUsers = await userRepo.find();
+      const keepUsers = allUsers.filter((u: any) => {
+        const role = String(u?.role || '').toUpperCase();
+        return role === 'ADMIN' || role === 'SUPER_ADMIN';
+      });
+      const removeUsers = allUsers.filter((u: any) => !keepUsers.includes(u));
+      if (removeUsers.length > 0) {
+        await userRepo.remove(removeUsers as any);
+      }
+      if (keepUsers.length === 0) {
+        await userRepo.save(
+          userRepo.create({
+            name: 'Admin',
+            role: 'ADMIN',
+            pin: '1234',
+            assignedZoneIds: [],
+          }) as any,
+        );
+      }
+
+      const settingsRepo = manager.getRepository(RestaurantSettings);
+      const settingsRows = await settingsRepo.find();
+      if (settingsRows.length > 0) {
+        await settingsRepo.remove(settingsRows as any);
+      }
+    });
+
+    await settingsService.saveSettings({});
+
+    try {
+      await fileLog.appendAuditLine('developer', {
+        action: 'maintenance_reset_minimal',
+      });
+    } catch {
+      /* ignore */
+    }
+
+    const users = await AppDataSource.getRepository(User).find();
+    const keptUsers = users.filter((u: any) => {
+      const role = String(u?.role || '').toUpperCase();
+      return role === 'ADMIN' || role === 'SUPER_ADMIN';
+    });
+    return res.json({
+      ok: true,
+      message: 'Base réinitialisée (ADMIN/SUPER_ADMIN + settings par défaut).',
+      keptUsers: keptUsers.map((u: any) => ({
+        id: u.id,
+        name: u.name,
+        role: u.role,
+      })),
+    });
   } catch (e) {
     return res.status(500).json({ error: (e as any)?.message || 'Server error' });
   }

@@ -60,18 +60,27 @@ const Wordmark: React.FC<{
   medium?: boolean;
   darkSurface?: boolean;
 }> = ({ large, medium, darkSurface }) => (
-  <span
-    className={`font-black tracking-tight ${
-      large
-        ? "text-4xl sm:text-5xl"
-        : medium
-          ? "text-3xl sm:text-4xl"
-          : "text-xl lg:text-2xl"
-    }`}
-  >
-    <span className={darkSurface ? "text-white" : "text-slate-900"}>Axia</span>
-    <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-indigo-400 to-fuchsia-400">
-      Flex
+  <span className="inline-flex flex-col items-start">
+    <span
+      className={`font-black tracking-tight ${
+        large
+          ? "text-4xl sm:text-5xl"
+          : medium
+            ? "text-3xl sm:text-4xl"
+            : "text-xl lg:text-2xl"
+      }`}
+    >
+      <span className={darkSurface ? "text-white" : "text-slate-900"}>Axia</span>
+      <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-indigo-400 to-fuchsia-400">
+        Flex
+      </span>
+    </span>
+    <span
+      className={`mt-1 font-extrabold uppercase tracking-[0.22em] ${
+        large ? "text-sm sm:text-base" : medium ? "text-xs sm:text-sm" : "text-[10px] sm:text-xs"
+      } ${darkSurface ? "text-cyan-200/90" : "text-indigo-700"}`}
+    >
+      Cloud
     </span>
   </span>
 );

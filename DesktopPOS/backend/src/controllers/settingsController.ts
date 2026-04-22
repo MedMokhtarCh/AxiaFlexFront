@@ -232,6 +232,88 @@ export async function downloadClientReceiptTemplateSample(_req: Request, res: Re
   }
 }
 
+export async function downloadNacefHtmlTemplateSample(_req: Request, res: Response) {
+  try {
+    const sample = [
+      "<!DOCTYPE html>",
+      "<html lang=\"fr\">",
+      "<head>",
+      "  <meta charset=\"UTF-8\" />",
+      "  <meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\" />",
+      "  <style>",
+      "    * { margin: 0; padding: 0; box-sizing: border-box; }",
+      "    @page { size: 80mm auto; margin: 0; }",
+      "    html, body { height: fit-content; min-height: 0; overflow: visible; background: #f1f5f9; font-family: Arial, Helvetica, sans-serif; padding: 3mm; }",
+      "    .card { background: #fff; border-radius: 10px; padding: 12px; border: 2px solid #0f172a; }",
+      "    .sep { border: none; border-top: 1px dashed #cbd5e1; margin: 6px 0; }",
+      "    .meta { font-size: 9px; color: #64748b; line-height: 1.5; }",
+      "    .line { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; font-weight: 700; color: #374151; margin-bottom: 2px; }",
+      "    .line .u { font-weight: 400; color: #94a3b8; }",
+      "    .tot { display: flex; justify-content: space-between; font-size: 10px; font-weight: 700; color: #1e293b; line-height: 1.9; }",
+      "    .tot.ttc { color: #4338ca; font-size: 14px; font-weight: 900; }",
+      "    .fiscal { font-size: 10px; color: #0f172a; line-height: 1.5; }",
+      "    .qr { text-align: center; margin-top: 8px; }",
+      "    .qr img { width: 180px; height: 180px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; padding: 6px; }",
+      "    .qr p { font-size: 9px; color: #64748b; margin-top: 4px; }",
+      "  </style>",
+      "</head>",
+      "<body>",
+      "  <div class=\"card\">",
+      "    <div style=\"text-align:center;font-size:16px;font-weight:900;color:#1e293b\">{{nacefMerchantName}}</div>",
+      "    <div style=\"text-align:center;font-size:9px;color:#64748b;margin-top:2px\">FORMAT NACEF 1.1.4</div>",
+      "    <hr class=\"sep\" />",
+      "    <div class=\"meta\">",
+      "      <div>Version: {{nacefVersion}}</div>",
+      "      <div>Transaction: {{nacefTransactionId}}</div>",
+      "      <div>Date: {{nacefTimestamp}}</div>",
+      "      <div>Opération: {{nacefOperationType}} / {{nacefOperationContext}}</div>",
+      "      <div>IMDF: {{fiscalImdf}}</div>",
+      "      <div>MF: {{nacefMf}}</div>",
+      "    </div>",
+      "    <hr class=\"sep\" />",
+      "    {{#each nacefSaleDetails}}",
+      "      <div class=\"line\">",
+      "        <span>{{this.quantity}}x {{this.name}} <span class=\"u\">({{this.unitPrice}} {{currency}})</span></span>",
+      "        <span style=\"white-space:nowrap\">{{this.total}} {{currency}}</span>",
+      "      </div>",
+      "    {{/each}}",
+      "    <hr class=\"sep\" />",
+      "    <div class=\"tot\"><span>Prix HT</span><span>{{nacefTotalHt}} {{currency}}</span></div>",
+      "    <div class=\"tot\"><span>TVA</span><span>{{nacefTotalTva}} {{currency}}</span></div>",
+      "    <div class=\"tot ttc\"><span>Prix TTC</span><span>{{nacefTotalTtc}} {{currency}}</span></div>",
+      "    {{#each nacefPaymentDetails}}",
+      "      <div class=\"meta\" style=\"display:flex;justify-content:space-between\">",
+      "        <span>{{this.method}}</span><span>{{this.amount}} {{currency}}</span>",
+      "      </div>",
+      "    {{/each}}",
+      "    <hr class=\"sep\" />",
+      "    <div class=\"fiscal\">",
+      "      <div style=\"font-weight:900\">BLOC FISCAL NACEF</div>",
+      "      <div>Statut: {{fiscalStatus}}</div>",
+      "      <div>Mode: {{fiscalMode}}</div>",
+      "      <div>Code erreur: {{fiscalErrorCode}}</div>",
+      "    </div>",
+      "    <div class=\"qr\">",
+      "      <img src=\"https://quickchart.io/qr?text={{fiscalQrPayloadEncoded}}&size=180&ecLevel=H&margin=2\" alt=\"QR NACEF\" />",
+      "      <p>QR fiscal NACEF</p>",
+      "    </div>",
+      "  </div>",
+      "</body>",
+      "</html>",
+      "",
+    ].join("\n");
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename=\"client-nacef-template.sample.html\"',
+    );
+    res.send(sample);
+  } catch (err) {
+    console.error('downloadNacefHtmlTemplateSample error:', err);
+    res.status(500).json({ error: (err as any)?.message || 'Server error' });
+  }
+}
+
 export async function downloadPrintTemplatePreview(req: Request, res: Response) {
   try {
     const kindRaw = String(req.query.kind || 'client').trim().toLowerCase();

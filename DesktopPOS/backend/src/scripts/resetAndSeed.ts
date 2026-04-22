@@ -134,6 +134,7 @@ async function seedDatabase() {
       applyTimbreToTicket: true,
       applyTimbreToInvoice: true,
       printPreviewOnValidate: false,
+      printAutoOnPreview: true,
       receiptPdfDirectory: '',
       autoDownloadReceiptPdfOnClient: false,
       preventSaleOnInsufficientStock: true,

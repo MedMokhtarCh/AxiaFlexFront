@@ -200,6 +200,11 @@ const Sidebar: React.FC<SidebarProps> = ({
       return false;
     }
     if (!currentUser) return false;
+    const isKdsOnlyRole =
+      currentUser.role === Role.CHEF || currentUser.role === Role.BARTENDER;
+    if (isKdsOnlyRole) {
+      return item.id === "kds";
+    }
     const roleOk = item.roles.includes(currentUser.role);
     const claimOk = userClaims.has(`nav:${item.id}`);
     if (!roleOk && !claimOk) return false;

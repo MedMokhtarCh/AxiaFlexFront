@@ -1,7 +1,7 @@
 {
   "name": "axiaprinters",
   "version": "1.0.0",
-  "description": "AxiaPrinters Windows desktop app (Electron + Node)",
+  "description": "Axia Flex Print Windows desktop app (Electron + Node)",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -14,7 +14,7 @@
     "axiaflex",
     "print-agent"
   ],
-  "author": "AxiaPrinters",
+  "author": "Axia Flex Print",
   "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
@@ -23,7 +23,7 @@
   },
   "build": {
     "appId": "com.axiaflex.appwin",
-    "productName": "AxiaPrinters",
+    "productName": "Axia Flex Print",
     "directories": {
       "output": "dist"
     },

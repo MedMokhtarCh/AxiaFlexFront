@@ -30,7 +30,7 @@ export class Order {
   @Column({ type: 'decimal', precision: 10, scale: 3, default: 1.0 })
   timbre: number;
 
-  @Column()
+  @Column({ type: 'varchar', length: 32 })
   sessionDay: string;
 
   @CreateDateColumn()

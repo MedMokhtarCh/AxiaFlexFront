@@ -497,6 +497,15 @@ const buildClientTemplateData = (
   amount?: number,
 ) => {
   const logoSrc = resolveLogoSource(settings);
+  const nacefPayload = parseFiscalPayloadJson(ticket);
+  const tx = nacefPayload?.transaction || {};
+  const op = tx?.operation || {};
+  const merchant = nacefPayload?.merchant_identity || {};
+  const estab = merchant?.taxpayer_establishment || {};
+  const saleDetails = Array.isArray(nacefPayload?.sale_details) ? nacefPayload.sale_details : [];
+  const paymentRows = Array.isArray(nacefPayload?.payment_details?.collection_details)
+    ? nacefPayload.payment_details.collection_details
+    : [];
   return {
   restaurantName: String((settings as any)?.restaurantName || ''),
   headerText: String((settings as any)?.clientTicketLayout?.headerText || ''),
@@ -527,6 +536,46 @@ const buildClientTemplateData = (
   ),
   currency: String((settings as any)?.currency || 'DT'),
   logoSrc,
+  logoUrl: logoSrc,
+  fiscalStatus: String((ticket as any)?.fiscalStatus || 'PENDING'),
+  fiscalMode: String((ticket as any)?.fiscalMode || ''),
+  fiscalImdf: String((ticket as any)?.fiscalImdf || tx?.originator?.imdf || ''),
+  fiscalErrorCode: String((ticket as any)?.fiscalErrorCode || ''),
+  fiscalQrPayload: String((ticket as any)?.fiscalQrPayload || ''),
+  fiscalQrPayloadEncoded: encodeURIComponent(String((ticket as any)?.fiscalQrPayload || '')),
+  nacefVersion: String(nacefPayload?.version || ''),
+  nacefTransactionId: String(tx?.id || ''),
+  nacefTimestamp: String(tx?.timestamp || ''),
+  nacefOperationType: String(op?.op_type || ''),
+  nacefOperationContext: String(op?.context || ''),
+  nacefMf: String(merchant?.id || ''),
+  nacefMerchantName: String(estab?.commercial_name || ''),
+  nacefSaleDetails: saleDetails.map((row: any) => {
+    const qty = Number(row?.quantity || 0);
+    const name = String(row?.product?.name || 'Article');
+    const unit = Number(row?.product?.price_pre_tax || 0) / 1000;
+    const total = qty * unit;
+    return {
+      quantity: qty,
+      name,
+      unitPrice: unit.toFixed(3),
+      total: total.toFixed(3),
+    };
+  }),
+  nacefPaymentDetails: paymentRows.map((row: any) => ({
+    method: String(row?.method || '-'),
+    amount: (Number(row?.amount || 0) / 1000).toFixed(3),
+  })),
+  nacefTotalHt: Number(getPayloadHtTotal(nacefPayload || {})).toFixed(3),
+  nacefTotalTva: Number(getPayloadTaxTotal(nacefPayload || {})).toFixed(3),
+  nacefTotalTtc: Number(getPayloadSaleTotal(nacefPayload || {})).toFixed(3),
+  nacefJson: (() => {
+    try {
+      return nacefPayload ? JSON.stringify(nacefPayload, null, 2) : '';
+    } catch {
+      return '';
+    }
+  })(),
   };
 };
 const formatPrintableDate = (raw: any) => {
@@ -808,7 +857,7 @@ ${paymentsHtml ? `<hr class="sep"><div style="font-size:9px;color:#64748b">${pay
   ${String((ticket as any)?.fiscalMode || '').trim() ? `<div>Mode: ${String((ticket as any).fiscalMode).toUpperCase()}</div>` : ''}
   ${String((ticket as any)?.fiscalErrorCode || '').trim() ? `<div>Code erreur: ${String((ticket as any).fiscalErrorCode)}</div>` : ''}
 </div>
-${String((ticket as any)?.fiscalQrPayload || '').trim() ? `<div style="text-align:center;margin-top:6px"><img src="https://quickchart.io/qr?text=${encodeURIComponent(String((ticket as any).fiscalQrPayload))}&size=100" style="width:100px;height:100px;border:1px solid #e2e8f0;border-radius:6px" /><div style="font-size:8px;color:#64748b;margin-top:4px">QR fiscal NACEF</div></div>` : ''}
+${String((ticket as any)?.fiscalQrPayload || '').trim() ? `<div style="text-align:center;margin-top:8px"><img src="https://quickchart.io/qr?text=${encodeURIComponent(String((ticket as any).fiscalQrPayload))}&size=180&ecLevel=H&margin=2" style="width:180px;height:180px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;padding:6px" /><div style="font-size:9px;color:#64748b;margin-top:4px">QR fiscal NACEF</div></div>` : ''}
 </div>
 <script>window.onload=function(){setTimeout(function(){window.print();},350);};window.onafterprint=function(){setTimeout(function(){try{window.close();}catch(e){}},1000);};</script>
 </body></html>`;
@@ -1074,16 +1123,30 @@ const openUrlInBrowser = async (url: string): Promise<void> => {
 /**
  * PRIMARY print function for LOCAL mode.
  * Registers HTML in the in-memory store, opens http://localhost:PORT/print/preview/<token>.
- * For CLOUD mode, strips HTML tags and enqueues as plain text.
+ * For CLOUD mode, enqueue the same HTML so layout stays identical across modes.
  */
 const printViaLocalBrowser = async (
   printerName: string,
   htmlContent: string,
-  _tag = 'print',
+  tag = 'print',
   printerMeta?: { terminalNodeId?: string | null; terminalPrinterLocalId?: string | null },
+  cloudTemplate?: { kind?: string; data?: Record<string, unknown> },
 ): Promise<void> => {
   if (await shouldEnqueueTerminalJob(printerMeta)) {
-    await printText(printerName, htmlToPlainText(htmlContent), printerMeta);
+    await enqueuePrintJob({
+      terminalNodeId: String(printerMeta!.terminalNodeId),
+      printerLocalId: printerMeta!.terminalPrinterLocalId || null,
+      printerName: printerName || null,
+      payload: {
+        type: 'HTML_PRINT',
+        printerName,
+        fileName: `${sanitizeFileName(String(tag || 'print'), 'print')}.html`,
+        htmlBase64: Buffer.from(String(htmlContent || ''), 'utf8').toString('base64'),
+        templateKind: String(cloudTemplate?.kind || '').trim() || undefined,
+        templateData: cloudTemplate?.data || undefined,
+      },
+      maxRetries: 3,
+    });
     return;
   }
   const token = registerPrintPage(htmlContent);
@@ -1189,7 +1252,7 @@ const buildModelReceiptHtml = (
   ${String((ticket as any)?.fiscalImdf || '').trim() ? `<div>IMDF: ${String((ticket as any).fiscalImdf)}</div>` : ''}
   ${String((ticket as any)?.fiscalErrorCode || '').trim() ? `<div>Code erreur: ${String((ticket as any).fiscalErrorCode)}</div>` : ''}
 </div>
-${String((ticket as any)?.fiscalQrPayload || '').trim() ? `<div style="text-align:center;margin-top:6px"><img src="https://quickchart.io/qr?text=${encodeURIComponent(String((ticket as any).fiscalQrPayload))}&size=100" style="width:100px;height:100px;border:1px solid #e2e8f0;border-radius:6px" /><div style="font-size:8px;color:#64748b;margin-top:4px">QR fiscal NACEF</div></div>` : ''}`
+${String((ticket as any)?.fiscalQrPayload || '').trim() ? `<div style="text-align:center;margin-top:8px"><img src="https://quickchart.io/qr?text=${encodeURIComponent(String((ticket as any).fiscalQrPayload))}&size=180&ecLevel=H&margin=2" style="width:180px;height:180px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;padding:6px" /><div style="font-size:9px;color:#64748b;margin-top:4px">QR fiscal NACEF</div></div>` : ''}`
     : '';
 
   const safe = String(printerName || 'Imprimante').replace(/[<>"'&]/g, ' ');
@@ -1783,6 +1846,23 @@ export async function printOrderItemsByPrinter(
         await printViaLocalBrowser(printer.name, bonHtml, `bon-${isBar ? 'bar' : 'cuisine'}`, {
           terminalNodeId: (printer as any).terminalNodeId || null,
           terminalPrinterLocalId: (printer as any).terminalPrinterLocalId || null,
+        }, {
+          kind: isBar ? 'bar' : 'kitchen',
+          data: {
+            title: String(options?.titleOverride || tpl?.title || (isBar ? 'BON BAR' : 'BON CUISINE')),
+            orderNumber: String(order?.ticketNumber || ''),
+            orderRef: String(orderRef || ''),
+            tableNumber: String(order?.tableNumber || ''),
+            serverName: String(order?.serverName || ''),
+            createdAt: formatPrintableDate(order?.createdAt || Date.now()),
+            orderType: String(order?.type || ''),
+            items: list.map((it: any) => ({
+              name: String(it?.name || 'Article'),
+              quantity: Number(it?.quantity || 0),
+              notes: String(it?.notes || ''),
+            })),
+            footerText: footerLine,
+          } as any,
         });
       }
     } catch (err) {
@@ -1878,6 +1958,7 @@ export async function printPaymentReceipt(
   await fs.mkdir(targetDir, { recursive: true });
   const designerClientHtml = getDesignerTemplateHtml(settings, 'client');
   const clientSource = getPrintTemplateSource(settings, 'client');
+  const nacefTemplateActive = isNacefPrintTemplateActive(settings);
   const assignedName = await resolvePhysicalPrinterNameForOrderServer(order);
   const printTarget = assignedName || receipt?.name;
   if (!printTarget) {
@@ -1901,7 +1982,18 @@ export async function printPaymentReceipt(
   for (let i = 0; i < copies; i += 1) {
     if (isDesktopBridgeMode(settings)) {
       let renderedHtmlForBridge = '';
-      if (clientSource === 'DESIGNER' && designerClientHtml) {
+      const nacefTemplateActive = isNacefPrintTemplateActive(settings);
+      if (nacefTemplateActive) {
+        renderedHtmlForBridge = buildModelReceiptHtml(
+          printTarget,
+          settings,
+          order,
+          ticket,
+          items,
+          effectivePaymentMethod,
+          amount,
+        );
+      } else if (clientSource === 'DESIGNER' && designerClientHtml) {
         try {
           renderedHtmlForBridge = renderExternalClientTemplate(
             String(designerClientHtml || ''),
@@ -1917,6 +2009,16 @@ export async function printPaymentReceipt(
         } catch {
           renderedHtmlForBridge = '';
         }
+      } else {
+        renderedHtmlForBridge = buildModelReceiptHtml(
+          printTarget,
+          settings,
+          order,
+          ticket,
+          items,
+          effectivePaymentMethod,
+          amount,
+        );
       }
       const bridgePayload = {
         kind: 'client',
@@ -1950,7 +2052,7 @@ export async function printPaymentReceipt(
       continue;
     }
     try {
-      if (getPrintTemplateSource(settings, 'client') === 'DESIGNER' && designerClientHtml) {
+      if (!nacefTemplateActive && getPrintTemplateSource(settings, 'client') === 'DESIGNER' && designerClientHtml) {
         const renderedHtml = renderExternalClientTemplate(
           String(designerClientHtml || ''),
           buildClientTemplateData(
@@ -1988,6 +2090,16 @@ export async function printPaymentReceipt(
         await printViaLocalBrowser(printTarget, receiptHtml, `receipt-${sanitizeFileName(ticketCode, 'ticket')}`, {
           terminalNodeId: (mapped as any)?.terminalNodeId || null,
           terminalPrinterLocalId: (mapped as any)?.terminalPrinterLocalId || null,
+        }, {
+          kind: nacefTemplateActive ? 'client_nacef' : 'client_default',
+          data: buildClientTemplateData(
+            settings,
+            order,
+            ticket,
+            items,
+            effectivePaymentMethod,
+            amount,
+          ) as any,
         });
       }
     } catch (err) {
@@ -2116,9 +2228,21 @@ export async function  printProvisionalClientReceipt(orderId: string) {
   const mapped = printers.find((p: any) => String(p.name || '') === String(printTarget || ''));
   const designerClientHtml = getDesignerTemplateHtml(settings, 'client');
   const clientSource = getPrintTemplateSource(settings, 'client');
+  const nacefTemplateActive = isNacefPrintTemplateActive(settings);
   if (isDesktopBridgeMode(settings)) {
     let renderedHtmlForBridge = '';
-    if (clientSource === 'DESIGNER' && designerClientHtml) {
+    const nacefTemplateActive = isNacefPrintTemplateActive(settings);
+    if (nacefTemplateActive) {
+      renderedHtmlForBridge = buildModelReceiptHtml(
+        printTarget,
+        settings,
+        order,
+        fakeTicket,
+        fakeItems,
+        paymentMethod,
+        undefined,
+      );
+    } else if (clientSource === 'DESIGNER' && designerClientHtml) {
       try {
         renderedHtmlForBridge = renderExternalClientTemplate(
           String(designerClientHtml || ''),
@@ -2127,6 +2251,16 @@ export async function  printProvisionalClientReceipt(orderId: string) {
       } catch {
         renderedHtmlForBridge = '';
       }
+    } else {
+      renderedHtmlForBridge = buildModelReceiptHtml(
+        printTarget,
+        settings,
+        order,
+        fakeTicket,
+        fakeItems,
+        paymentMethod,
+        undefined,
+      );
     }
     await postDesktopBridgeJob(settings, {
       kind: 'client',
@@ -2159,7 +2293,7 @@ export async function  printProvisionalClientReceipt(orderId: string) {
     return;
   }
   try {
-    if (getPrintTemplateSource(settings, 'client') === 'DESIGNER' && designerClientHtml) {
+    if (!nacefTemplateActive && getPrintTemplateSource(settings, 'client') === 'DESIGNER' && designerClientHtml) {
       const renderedHtml = renderExternalClientTemplate(
         String(designerClientHtml || ''),
         buildClientTemplateData(settings, order, fakeTicket, fakeItems, undefined),
@@ -2184,6 +2318,16 @@ export async function  printProvisionalClientReceipt(orderId: string) {
       await printViaLocalBrowser(printTarget, provHtml, `prov-receipt`, {
         terminalNodeId: (mapped as any)?.terminalNodeId || null,
         terminalPrinterLocalId: (mapped as any)?.terminalPrinterLocalId || null,
+      }, {
+        kind: nacefTemplateActive ? 'client_nacef' : 'client_default',
+        data: buildClientTemplateData(
+          settings,
+          order,
+          fakeTicket,
+          fakeItems,
+          paymentMethod,
+          undefined,
+        ) as any,
       });
     }
   } catch (err) {
@@ -2281,6 +2425,23 @@ export async function printProductionTest(opts: {
     await printViaLocalBrowser(target.name, testBonHtml, `test-${isBar ? 'bar' : 'cuisine'}`, {
       terminalNodeId: (target as any).terminalNodeId || null,
       terminalPrinterLocalId: (target as any).terminalPrinterLocalId || null,
+    }, {
+      kind: isBar ? 'bar' : 'kitchen',
+      data: {
+        title: String(tpl?.title || (isBar ? 'BON BAR' : 'BON CUISINE')),
+        orderRef: 'TEST01',
+        tableNumber: 'TEST',
+        serverName: 'TEST',
+        createdAt: formatPrintableDate(Date.now()),
+        items: [
+          {
+            name: isBar ? 'Mojito' : 'Pizza Margherita',
+            quantity: 1,
+            notes: tpl?.showItemNotes !== false ? 'TEST' : '',
+          },
+        ],
+        footerText: String(tpl?.footerText || '').trim(),
+      },
     });
   }
   return {
@@ -2320,7 +2481,8 @@ export async function printReceiptTest(opts: { printerId?: string }) {
   ];
   const settings = await getSettings();
   const designerHtml = getDesignerTemplateHtml(settings, 'client');
-  if (getPrintTemplateSource(settings, 'client') === 'DESIGNER' && designerHtml) {
+  const nacefTemplateActive = isNacefPrintTemplateActive(settings);
+  if (!nacefTemplateActive && getPrintTemplateSource(settings, 'client') === 'DESIGNER' && designerHtml) {
     const renderedHtml = renderExternalClientTemplate(String(designerHtml || ''), {
       restaurantName: String((settings as any)?.restaurantName || 'AxiaFlex'),
       headerText: 'Ticket test',
@@ -2365,6 +2527,26 @@ export async function printReceiptTest(opts: { printerId?: string }) {
     await printViaLocalBrowser(target.name, testReceiptHtml, 'test-receipt', {
       terminalNodeId: (target as any).terminalNodeId || null,
       terminalPrinterLocalId: (target as any).terminalPrinterLocalId || null,
+    }, {
+      kind: nacefTemplateActive ? 'client_nacef' : 'client_default',
+      data: {
+        restaurantName: String((settings as any)?.restaurantName || 'AxiaFlex'),
+        headerText: 'Ticket test',
+        footerText: 'Merci et a bientot !',
+        ticketCode: 'TK-TEST',
+        orderNumber: 'OR-TEST',
+        orderRef: 'OR-TEST',
+        tableNumber: 'TEST',
+        serverName: 'TEST',
+        createdAt: formatPrintableDate(now),
+        items: [{ name: 'Article test', quantity: 1, unitPrice: 1, total: 1 }],
+        subtotal: '1.000',
+        discount: '0.000',
+        timbre: '0.000',
+        total: '1.000',
+        amount: '1.000',
+        currency: String((settings as any)?.currency || 'DT'),
+      } as any,
     });
   }
   return {

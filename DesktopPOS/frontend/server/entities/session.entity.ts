@@ -7,7 +7,7 @@ export class PosSession {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ default: true })
+  @Column({ type: 'boolean', default: true })
   isOpen: boolean;
 
   @Column({ type: 'bigint' })

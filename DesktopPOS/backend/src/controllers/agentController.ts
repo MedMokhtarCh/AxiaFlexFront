@@ -125,3 +125,22 @@ export async function bindPrinterToTerminal(req: Request, res: Response) {
     res.status(500).json({ error: e?.message || 'Server error' });
   }
 }
+
+export async function deleteTerminal(req: Request, res: Response) {
+  try {
+    const userId = String(req.query.userId || '').trim();
+    if (!userId) return res.status(400).json({ error: 'userId requis' });
+    const user = await AppDataSource.getRepository(User).findOneBy({ id: userId } as any);
+    if (!user || String(user.role || '').toUpperCase() !== 'ADMIN') {
+      return res.status(403).json({ error: 'Accès réservé aux administrateurs' });
+    }
+    const terminalNodeId = String(req.params.id || '').trim();
+    if (!terminalNodeId) return res.status(400).json({ error: 'terminalNodeId requis' });
+    const out = await agentService.deleteTerminalAndCleanup(terminalNodeId);
+    res.json(out);
+  } catch (e: any) {
+    const msg = String(e?.message || 'Server error');
+    if (/introuvable/i.test(msg)) return res.status(404).json({ error: msg });
+    res.status(500).json({ error: msg });
+  }
+}

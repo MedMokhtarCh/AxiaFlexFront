@@ -140,7 +140,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({
               </span>
             </p>
             <p className="mt-2 text-center text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
-              Point de vente
+              Cloud
             </p>
           </div>
           <div

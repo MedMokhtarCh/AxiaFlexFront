@@ -7,7 +7,7 @@ export class Category {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ type: 'varchar', length: 128 })
   name: string;
 
   @ManyToOne(() => Category, (category) => category.children, { nullable: true, onDelete: 'SET NULL' })

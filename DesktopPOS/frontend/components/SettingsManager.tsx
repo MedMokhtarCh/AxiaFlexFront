@@ -285,6 +285,7 @@ const SettingsManager: React.FC = () => {
     deletePrinter,
     getDetectedPrinters,
     getTerminalNodes,
+    deleteTerminalNode,
     bindPrinterTerminal,
     settings,
     updateSettings,
@@ -683,6 +684,7 @@ const SettingsManager: React.FC = () => {
   );
   const [selectedDetected, setSelectedDetected] = useState<string>("");
   const [terminalNodes, setTerminalNodes] = useState<TerminalNodeInfo[]>([]);
+  const [terminalCloudBusy, setTerminalCloudBusy] = useState(false);
   const [bindingDrafts, setBindingDrafts] = useState<
     Record<string, { terminalNodeId: string; terminalPrinterLocalId: string }>
   >({});
@@ -728,32 +730,57 @@ const SettingsManager: React.FC = () => {
     setSelectedDetected("");
   };
 
+  const refreshCloudTerminalsAndPrinters = async (
+    notifyDone = false,
+  ): Promise<void> => {
+    const uid = String(currentUser?.id || "").trim();
+    if (!uid) {
+      notifyError("Utilisateur requis pour charger les terminaux.");
+      return;
+    }
+    setTerminalCloudBusy(true);
+    try {
+      const res = await getTerminalNodes(uid);
+      const terminals = Array.isArray(res?.terminals) ? res.terminals : [];
+      setTerminalNodes(terminals);
+      const fromAgents: DetectedPrinter[] = terminals.flatMap((t) =>
+        (Array.isArray(t.printers) ? t.printers : []).map((lp) => ({
+          Name: String(lp.name || lp.printerLocalId || ""),
+          DriverName: String(lp.driverName || ""),
+          PortName: String(lp.printerLocalId || lp.portName || ""),
+        })),
+      );
+      setDetectedPrinters(fromAgents);
+      setBindingDrafts((prev) => {
+        const next = { ...prev };
+        for (const p of printers) {
+          if (!next[p.id]) {
+            next[p.id] = {
+              terminalNodeId: String((p as any).terminalNodeId || ""),
+              terminalPrinterLocalId: String(
+                (p as any).terminalPrinterLocalId || "",
+              ),
+            };
+          }
+        }
+        return next;
+      });
+      if (notifyDone) {
+        notifySuccess("Terminaux cloud rafraîchis.");
+      }
+    } catch (e: any) {
+      notifyError(e?.message || "Impossible de rafraîchir les terminaux.");
+      setTerminalNodes([]);
+    } finally {
+      setTerminalCloudBusy(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTab !== "hardware") return;
     if (printRoutingMode !== "CLOUD") return;
-    const uid = String(currentUser?.id || "").trim();
-    if (!uid) return;
-    void getTerminalNodes(uid)
-      .then((res) => {
-        const terminals = Array.isArray(res?.terminals) ? res.terminals : [];
-        setTerminalNodes(terminals);
-        setBindingDrafts((prev) => {
-          const next = { ...prev };
-          for (const p of printers) {
-            if (!next[p.id]) {
-              next[p.id] = {
-                terminalNodeId: String((p as any).terminalNodeId || ""),
-                terminalPrinterLocalId: String(
-                  (p as any).terminalPrinterLocalId || "",
-                ),
-              };
-            }
-          }
-          return next;
-        });
-      })
-      .catch(() => setTerminalNodes([]));
-  }, [activeTab, currentUser?.id, getTerminalNodes, printers, printRoutingMode]);
+    void refreshCloudTerminalsAndPrinters(false);
+  }, [activeTab, currentUser?.id, printers, printRoutingMode]);
 
   // Zones & Tables States
   const [newZoneName, setNewZoneName] = useState("");
@@ -1410,6 +1437,7 @@ const SettingsManager: React.FC = () => {
     applyTimbreToTicket: false,
     applyTimbreToInvoice: false,
     printPreviewOnValidate: false,
+    printAutoOnPreview: true,
   });
   const [genTouch, setGenTouch] = useState({
     touchUiMode: false,
@@ -1500,6 +1528,7 @@ const SettingsManager: React.FC = () => {
       applyTimbreToTicket: Boolean(settings.applyTimbreToTicket),
       applyTimbreToInvoice: Boolean(settings.applyTimbreToInvoice),
       printPreviewOnValidate: Boolean(settings.printPreviewOnValidate),
+      printAutoOnPreview: (settings as any).printAutoOnPreview !== false,
     });
     setGenTouch({
       touchUiMode: Boolean(settings.touchUiMode),
@@ -2051,6 +2080,7 @@ const SettingsManager: React.FC = () => {
             Number(genTouch.clientTicketPrintCopies || 1),
           ),
           printPreviewOnValidate: Boolean(genFiscal.printPreviewOnValidate),
+          printAutoOnPreview: Boolean(genFiscal.printAutoOnPreview),
           clientTicketLayout: {
             ...(genTicket.clientTicketLayout || {}),
           },
@@ -2122,6 +2152,12 @@ const SettingsManager: React.FC = () => {
         setGenFiscal((p) => ({
           ...p,
           printPreviewOnValidate: Boolean(source?.printPreviewOnValidate),
+        }));
+      }
+      if (source?.printAutoOnPreview !== undefined) {
+        setGenFiscal((p) => ({
+          ...p,
+          printAutoOnPreview: Boolean(source?.printAutoOnPreview),
         }));
       }
       if (source?.clientTicketPrintCopies !== undefined) {
@@ -2227,6 +2263,31 @@ const SettingsManager: React.FC = () => {
       );
     } catch {
       notifyError("Téléchargement du template HTML client impossible.");
+    }
+  };
+
+  const handleDownloadNacefHtmlTemplateSample = async () => {
+    try {
+      const response = await fetch(
+        `${SETTINGS_LOG_API_BASE}/pos/settings/client-receipt-template/nacef-html`,
+        {
+          method: "GET",
+          cache: "no-store",
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Téléchargement impossible (${response.status})`);
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") || "";
+      const match = disposition.match(/filename="([^"]+)"/i);
+      const fileName = match?.[1] || "client-nacef-template.sample.html";
+      downloadBlob(blob, fileName);
+      notifySuccess("Template HTML NACEF téléchargé.");
+    } catch (e: any) {
+      notifyError(
+        e?.message || "Téléchargement du template HTML NACEF impossible.",
+      );
     }
   };
 
@@ -3554,6 +3615,7 @@ const SettingsManager: React.FC = () => {
                     applyTimbreToTicket: genFiscal.applyTimbreToTicket,
                     applyTimbreToInvoice: genFiscal.applyTimbreToInvoice,
                     printPreviewOnValidate: genFiscal.printPreviewOnValidate,
+                    printAutoOnPreview: genFiscal.printAutoOnPreview,
                   } as any)
                 }}
                 onReset={() =>
@@ -3572,6 +3634,8 @@ const SettingsManager: React.FC = () => {
                     printPreviewOnValidate: Boolean(
                       settings.printPreviewOnValidate,
                     ),
+                    printAutoOnPreview:
+                      (settings as any).printAutoOnPreview !== false,
                   })
                 }
               >
@@ -3889,6 +3953,21 @@ const SettingsManager: React.FC = () => {
                         setGenFiscal((p) => ({
                           ...p,
                           printPreviewOnValidate: e.target.checked,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="mt-3 flex items-center justify-between bg-white border border-slate-100 rounded-xl px-4 py-3">
+                    <span className="text-[10px] font-black text-slate-600 uppercase">
+                      Impression auto quand l'aperçu est ouvert
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={genFiscal.printAutoOnPreview}
+                      onChange={(e) =>
+                        setGenFiscal((p) => ({
+                          ...p,
+                          printAutoOnPreview: e.target.checked,
                         }))
                       }
                     />
@@ -4447,6 +4526,14 @@ const SettingsManager: React.FC = () => {
                     >
                       <Download size={12} />
                       HTML client
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadNacefHtmlTemplateSample}
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-[10px] font-black uppercase tracking-wider hover:bg-amber-100"
+                    >
+                      <Download size={12} />
+                      HTML NACEF
                     </button>
                     <button
                       type="button"
@@ -7075,10 +7162,22 @@ const SettingsManager: React.FC = () => {
                 <h3 className="text-lg font-black text-slate-800">
                   Terminaux connectés
                 </h3>
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                  {terminalNodes.length} terminal
-                  {terminalNodes.length > 1 ? "s" : ""}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                    {terminalNodes.length} terminal
+                    {terminalNodes.length > 1 ? "s" : ""}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void refreshCloudTerminalsAndPrinters(true);
+                    }}
+                    disabled={terminalCloudBusy}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-60"
+                  >
+                    {terminalCloudBusy ? "..." : "Rafraîchir"}
+                  </button>
+                </div>
               </div>
               {terminalNodes.length === 0 ? (
                 <p className="text-sm font-bold text-slate-500">
@@ -7122,6 +7221,53 @@ const SettingsManager: React.FC = () => {
                         Imprimantes détectées:{" "}
                         {Array.isArray(t.printers) ? t.printers.length : 0}
                       </p>
+                      {Array.isArray(t.printers) && t.printers.length > 0 ? (
+                        <div className="space-y-1">
+                          {t.printers.map((lp) => (
+                            <p
+                              key={lp.id}
+                              className="text-[10px] text-slate-500 font-bold truncate"
+                            >
+                              • {lp.name} ({lp.transport})
+                            </p>
+                          ))}
+                        </div>
+                      ) : null}
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const uid = String(currentUser?.id || "").trim();
+                            if (!uid) {
+                              notifyError("Utilisateur requis pour supprimer un terminal.");
+                              return;
+                            }
+                            const ok = window.confirm(
+                              `Supprimer le terminal "${t.alias}" ?`,
+                            );
+                            if (!ok) return;
+                            try {
+                              const out = await deleteTerminalNode({
+                                userId: uid,
+                                terminalNodeId: t.id,
+                              });
+                              notifySuccess(
+                                `Terminal supprimé. ${Number(
+                                  out?.unboundPrinters || 0,
+                                )} imprimante(s) locale(s) déliée(s).`,
+                              );
+                              await refreshCloudTerminalsAndPrinters(false);
+                            } catch (e: any) {
+                              notifyError(
+                                e?.message || "Suppression terminal impossible.",
+                              );
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 text-[10px] font-black uppercase tracking-widest"
+                        >
+                          Supprimer
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -7137,24 +7283,7 @@ const SettingsManager: React.FC = () => {
                   <button
                     onClick={async () => {
                       if (printRoutingMode === "CLOUD") {
-                        const uid = String(currentUser?.id || "").trim();
-                        if (!uid) {
-                          notifyError("Utilisateur requis pour charger les terminaux.");
-                          return;
-                        }
-                        const res = await getTerminalNodes(uid);
-                        const terminals = Array.isArray(res?.terminals)
-                          ? res.terminals
-                          : [];
-                        setTerminalNodes(terminals);
-                        const fromAgents: DetectedPrinter[] = terminals.flatMap((t) =>
-                          (Array.isArray(t.printers) ? t.printers : []).map((lp) => ({
-                            Name: String(lp.name || lp.printerLocalId || ""),
-                            DriverName: String(lp.driverName || ""),
-                            PortName: String(lp.printerLocalId || lp.portName || ""),
-                          })),
-                        );
-                        setDetectedPrinters(fromAgents);
+                        await refreshCloudTerminalsAndPrinters(true);
                       } else {
                         const list = await getDetectedPrinters();
                         setDetectedPrinters(Array.isArray(list) ? list : []);
@@ -7169,7 +7298,7 @@ const SettingsManager: React.FC = () => {
                   <button
                     onClick={() => {
                       const p = detectedPrinters.find(
-                        (d) => d.Name === selectedDetected,
+                        (d) => `${d.Name}::${d.PortName || ""}` === selectedDetected,
                       );
                       if (p) {
                         setNewPrinterName(p.Name);
@@ -7194,8 +7323,11 @@ const SettingsManager: React.FC = () => {
                       : "Imprimantes détectées..."}
                   </option>
                   {detectedPrinters.map((p) => (
-                    <option key={p.Name} value={p.Name}>
-                      {p.Name}
+                    <option
+                      key={`${p.Name}::${p.PortName || ""}`}
+                      value={`${p.Name}::${p.PortName || ""}`}
+                    >
+                      {p.Name} {p.PortName ? `(${p.PortName})` : ""}
                     </option>
                   ))}
                 </select>

@@ -7,7 +7,7 @@ export class Zone {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ type: 'varchar', length: 128 })
   name: string;
 
   @OneToMany(() => TableConfig, (table) => table.zone)

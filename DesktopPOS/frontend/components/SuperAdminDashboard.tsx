@@ -144,6 +144,9 @@ const SuperAdminDashboard: React.FC<Props> = ({ token, onExit }) => {
   const [agentSiteName, setAgentSiteName] = useState("SITE-A");
   const [agentPollMs, setAgentPollMs] = useState("3000");
   const [agentServiceName, setAgentServiceName] = useState("AxiaFlexPrintAgent");
+  const [maintenanceBusy, setMaintenanceBusy] = useState<
+    "" | "purge" | "reset"
+  >("");
 
   const load = useCallback(async () => {
     setErr("");
@@ -377,6 +380,43 @@ const SuperAdminDashboard: React.FC<Props> = ({ token, onExit }) => {
       await load();
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const runMaintenanceAction = async (kind: "purge" | "reset") => {
+    const confirmed = window.confirm(
+      kind === "purge"
+        ? "Confirmer la suppression des commandes, tickets et paiements ?"
+        : "Confirmer la réinitialisation (garder seulement ADMIN/SUPER_ADMIN + settings par défaut) ?",
+    );
+    if (!confirmed) return;
+    setErr("");
+    setOkMsg("");
+    setMaintenanceBusy(kind);
+    try {
+      const path =
+        kind === "purge"
+          ? "/saas/maintenance/purge-transactions"
+          : "/saas/maintenance/reset-minimal";
+      const j = (await saasFetch(path, token, {
+        method: "POST",
+      })) as { message?: string };
+      setOkMsg(
+        j?.message ||
+          (kind === "purge"
+            ? "Commandes/tickets/paiements supprimés."
+            : "Base réinitialisée."),
+      );
+      await load();
+    } catch (e) {
+      if (isSaasSessionError(e)) {
+        setErr("Session super admin expirée. Merci de vous reconnecter.");
+        onExit();
+        return;
+      }
+      setErr(e instanceof Error ? e.message : "Opération de maintenance échouée.");
+    } finally {
+      setMaintenanceBusy("");
     }
   };
 
@@ -639,6 +679,39 @@ const SuperAdminDashboard: React.FC<Props> = ({ token, onExit }) => {
                   onChange={(e) => setMaxTerminals(e.target.value)}
                   className="mt-1 w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-sm font-bold"
                 />
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900 p-6 space-y-4">
+              <h2 className="text-sm font-black uppercase tracking-widest text-amber-400 flex items-center gap-2">
+                <AlertTriangle size={18} />
+                Maintenance base de données
+              </h2>
+              <p className="text-xs text-slate-400 font-bold leading-relaxed">
+                Outils réservés au Super Admin. Les articles, catégories et paramètres
+                sont conservés pour le test rapide.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  disabled={maintenanceBusy !== ""}
+                  onClick={() => runMaintenanceAction("purge")}
+                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                >
+                  {maintenanceBusy === "purge"
+                    ? "Suppression…"
+                    : "Supprimer commandes/tickets/paiements"}
+                </button>
+                <button
+                  type="button"
+                  disabled={maintenanceBusy !== ""}
+                  onClick={() => runMaintenanceAction("reset")}
+                  className="px-4 py-2 rounded-xl bg-rose-700 hover:bg-rose-600 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                >
+                  {maintenanceBusy === "reset"
+                    ? "Initialisation…"
+                    : "Initialiser base minimale"}
+                </button>
               </div>
             </section>
 

@@ -433,6 +433,9 @@ export const openApiPaths: Record<string, PathItem> = {
   '/pos/printers/test-print': {
     post: op('Printers', 'Test d\'impression'),
   },
+  '/pos/printers/test-receipt-print': {
+    post: op('Printers', 'Test d\'impression ticket client'),
+  },
   '/pos/printers/{id}': {
     delete: op('Printers', 'Supprimer une imprimante', ['id']),
   },

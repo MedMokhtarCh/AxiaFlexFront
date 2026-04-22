@@ -8,22 +8,22 @@ export class Product {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ type: 'varchar', length: 160 })
   name: string;
 
   @Column({ type: 'decimal', precision: 10, scale: 3 })
   price: number;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', length: 512, nullable: true })
   imageUrl: string;
 
-  @Column({ default: false })
+  @Column({ type: 'boolean', default: false })
   isPack: boolean;
 
   @Column({ type: 'jsonb', nullable: true })
   subItemIds: string[];
 
-  @Column({ default: true })
+  @Column({ type: 'boolean', default: true })
   manageStock: boolean;
 
   @Column({ type: 'int', default: 0 })
