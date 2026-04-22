@@ -403,24 +403,9 @@ async function printHtmlBase64(printerName, htmlBase64) {
   const normalizedHtml = normalizeHtmlForCloudPrint(rawHtml, PAPER_WIDTH_MM === 50 ? 384 : 576);
   await fs.writeFile(tmpHtml, Buffer.from(normalizedHtml, "utf8"));
   try {
-    const candidates = [
-      "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-      "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-      "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-    ];
-    let browserPath = "";
-    for (const p of candidates) {
-      try {
-        await fs.access(p);
-        browserPath = p;
-        break;
-      } catch {}
-    }
+    const browserPath = await resolveBrowserPath();
     if (!browserPath) {
-      const htmlRaw = Buffer.from(String(htmlBase64 || ""), "base64").toString("utf8");
-      await printRawText(printerName, htmlToPlainText(htmlRaw) || "[HTML_PRINT fallback texte vide]");
-      return;
+      throw new Error("Aucun navigateur Chromium (Edge/Chrome) trouvé pour rendu HTML.");
     }
     try {
       await printHtmlAsEscPosImage(printerName, browserPath, tmpHtml);
@@ -432,17 +417,38 @@ async function printHtmlBase64(printerName, htmlBase64) {
         `--print-to-pdf=${tmpPdf}`,
         url,
       ]);
-      try {
-        await printPdfFile(printerName, tmpPdf);
-      } catch {
-        const htmlRaw = Buffer.from(String(htmlBase64 || ""), "base64").toString("utf8");
-        await printRawText(printerName, htmlToPlainText(htmlRaw) || "[HTML_PRINT fallback texte vide]");
-      }
+      await printPdfFile(printerName, tmpPdf);
     }
   } finally {
     await fs.unlink(tmpHtml).catch(() => undefined);
     await fs.unlink(tmpPdf).catch(() => undefined);
   }
+}
+
+async function resolveBrowserPath() {
+  const candidates = [
+    "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+  ];
+  for (const p of candidates) {
+    try {
+      await fs.access(p);
+      return p;
+    } catch {}
+  }
+  try {
+    const { stdout } = await execFileAsync("where", ["msedge"]);
+    const p = String(stdout || "").split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+    if (p) return p;
+  } catch {}
+  try {
+    const { stdout } = await execFileAsync("where", ["chrome"]);
+    const p = String(stdout || "").split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+    if (p) return p;
+  } catch {}
+  return "";
 }
 
 function normalizeHtmlForCloudPrint(html, targetPxWidth) {
@@ -533,7 +539,7 @@ async function processJobs(token) {
           templateData.logoUrl = localLogo;
           templateData.logoBase64 = localLogo;
         }
-        if (templateKind) {
+        if (templateKind && templateKind !== "client_nacef") {
           const localTpl = await loadLocalTemplate(templateKind);
           if (localTpl) {
             finalHtml = renderTemplateString(localTpl, templateData);
