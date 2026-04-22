@@ -132,6 +132,7 @@ function getDefaultConfig() {
     siteName: "SITE-A",
     pollMs: 3000,
     paperWidthMm: 80,
+    printDeliveryMode: "auto",
     desktopBridge: {
       exePath: "",
       installerPath: "",
@@ -807,6 +808,10 @@ function startAgent(config) {
     SITE_NAME: String(config.siteName || "SITE-A").trim(),
     AGENT_POLL_MS: String(Math.max(1500, Number(config.pollMs) || 3000)),
     PAPER_WIDTH_MM: String(Number(config.paperWidthMm || 80) === 50 ? 50 : 80),
+    PRINT_DELIVERY_MODE:
+      String(config.printDeliveryMode || "auto").trim().toLowerCase() === "pdf_preview"
+        ? "pdf_preview"
+        : "auto",
   };
 
   let nodeRuntime = resolveNodeExe(config || {});

@@ -14,6 +14,10 @@ const TERMINAL_ALIAS = String(process.env.TERMINAL_ALIAS || os.hostname()).trim(
 const SITE_NAME = String(process.env.SITE_NAME || "").trim();
 const POLL_MS = Math.max(500, Number(process.env.AGENT_POLL_MS || 1000));
 const PAPER_WIDTH_MM = Number(process.env.PAPER_WIDTH_MM || 80) === 50 ? 50 : 80;
+const PRINT_DELIVERY_MODE =
+  String(process.env.PRINT_DELIVERY_MODE || "auto").trim().toLowerCase() === "pdf_preview"
+    ? "pdf_preview"
+    : "auto";
 const AGENT_HOME = path.join(process.env.LOCALAPPDATA || os.tmpdir(), "AxiaPrinters", "AppWinAgent");
 const STATE_FILE = path.join(AGENT_HOME, "state.json");
 const TEMPLATES_DIR = path.join(AGENT_HOME, "templates");
@@ -396,6 +400,17 @@ async function printPdfFile(printerName, pdfPath) {
   ]);
 }
 
+async function previewPdfFile(pdfPath) {
+  const escapedPath = String(pdfPath).replace(/'/g, "''");
+  await execFileAsync("powershell", [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    `Start-Process -FilePath '${escapedPath}'`,
+  ]);
+}
+
 async function printHtmlBase64(printerName, htmlBase64) {
   const tmpHtml = path.join(os.tmpdir(), `axiaprinters-print-${Date.now()}.html`);
   const tmpPdf = path.join(os.tmpdir(), `axiaprinters-print-${Date.now()}.pdf`);
@@ -406,6 +421,17 @@ async function printHtmlBase64(printerName, htmlBase64) {
     const browserPath = await resolveBrowserPath();
     if (!browserPath) {
       throw new Error("Aucun navigateur Chromium (Edge/Chrome) trouvé pour rendu HTML.");
+    }
+    if (PRINT_DELIVERY_MODE === "pdf_preview") {
+      const url = pathToFileURL(tmpHtml).toString();
+      await execFileAsync(browserPath, [
+        "--headless",
+        "--disable-gpu",
+        `--print-to-pdf=${tmpPdf}`,
+        url,
+      ]);
+      await previewPdfFile(tmpPdf);
+      return;
     }
     try {
       await printHtmlAsEscPosImage(printerName, browserPath, tmpHtml);
@@ -456,11 +482,28 @@ function normalizeHtmlForCloudPrint(html, targetPxWidth) {
   // Replace rigid paper-size CSS that shrinks receipt inside screenshot viewport.
   out = out.replace(/@page\s*\{[^}]*\}/gi, "@page{size:auto;margin:0}");
   out = out.replace(/width\s*:\s*\d+(\.\d+)?mm/gi, "width:100%");
+  // Cloud screenshot is not print media: remove popup helper banner to match local final output.
+  out = out.replace(/<div[^>]*class=["'][^"']*\bnotice\b[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, "");
+  const isNacefLike = /FORMAT\s*NACEF|BLOC\s*FISCAL\s*NACEF|QR\s*fiscal\s*NACEF/i.test(out);
+  const nacefBoostStyle = isNacefLike
+    ? `
+.card{padding:14px !important}
+.meta{font-size:11px !important;line-height:1.65 !important}
+.line{font-size:12px !important;margin-bottom:3px !important}
+.tot{font-size:12px !important;line-height:2 !important}
+.tot.ttc{font-size:18px !important}
+.fiscal{font-size:12px !important;line-height:1.6 !important}
+.qr img{width:220px !important;height:220px !important}
+.qr p{font-size:11px !important}
+`
+    : "";
   const forceStyle = `
 <style id="axiaprinters-force-width">
 html,body{width:${Number(targetPxWidth || 576)}px !important;max-width:${Number(targetPxWidth || 576)}px !important;margin:0 !important;padding:0 !important;overflow:visible !important;background:#fff !important}
 body>*{max-width:${Number(targetPxWidth || 576)}px !important}
 .wrap,.card,.container,.ticket,.receipt{width:100% !important;max-width:none !important;margin-left:0 !important;margin-right:0 !important}
+.notice{display:none !important}
+${nacefBoostStyle}
 </style>`;
   if (/<\/head>/i.test(out)) return out.replace(/<\/head>/i, `${forceStyle}</head>`);
   return `${forceStyle}${out}`;
@@ -524,7 +567,16 @@ async function processJobs(token) {
           await fs.unlink(tmpRaw).catch(() => undefined);
         }
       } else if (type === "PDF_PRINT") {
-        await printPdfBase64(printerName, String(payload.pdfBase64 || ""));
+        if (PRINT_DELIVERY_MODE === "pdf_preview") {
+          const tmp = path.join(os.tmpdir(), `axiaprinters-preview-${Date.now()}.pdf`);
+          await fs.writeFile(tmp, Buffer.from(String(payload.pdfBase64 || ""), "base64"));
+          await previewPdfFile(tmp);
+          setTimeout(() => {
+            fs.unlink(tmp).catch(() => undefined);
+          }, 10 * 60 * 1000);
+        } else {
+          await printPdfBase64(printerName, String(payload.pdfBase64 || ""));
+        }
       } else if (type === "HTML_PRINT") {
         const htmlBase64 = String(payload.htmlBase64 || "").trim();
         const htmlRaw = String(payload.html || payload.renderedHtml || "").trim();
