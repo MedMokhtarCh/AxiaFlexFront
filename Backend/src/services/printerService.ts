@@ -542,6 +542,7 @@ const buildClientTemplateData = (
   fiscalImdf: String((ticket as any)?.fiscalImdf || tx?.originator?.imdf || ''),
   fiscalErrorCode: String((ticket as any)?.fiscalErrorCode || ''),
   fiscalQrPayload: String((ticket as any)?.fiscalQrPayload || ''),
+  fiscalQrPayloadEncoded: encodeURIComponent(String((ticket as any)?.fiscalQrPayload || '')),
   nacefVersion: String(nacefPayload?.version || ''),
   nacefTransactionId: String(tx?.id || ''),
   nacefTimestamp: String(tx?.timestamp || ''),
