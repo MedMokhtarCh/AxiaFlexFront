@@ -401,6 +401,16 @@ async function printPdfFile(printerName, pdfPath) {
 }
 
 async function previewPdfFile(pdfPath) {
+  const browserPath = await resolveBrowserPath();
+  const fileUrl = pathToFileURL(String(pdfPath || "")).toString();
+  if (browserPath) {
+    await execFileAsync(browserPath, [
+      "--new-window",
+      "--disable-features=msEdgeSidebarV2",
+      fileUrl,
+    ]);
+    return;
+  }
   const escapedPath = String(pdfPath).replace(/'/g, "''");
   await execFileAsync("powershell", [
     "-NoProfile",
@@ -408,6 +418,15 @@ async function previewPdfFile(pdfPath) {
     "Bypass",
     "-Command",
     `Start-Process -FilePath '${escapedPath}'`,
+  ]);
+}
+
+async function previewHtmlPrintDialog(browserPath, htmlPath) {
+  const fileUrl = pathToFileURL(String(htmlPath || "")).toString();
+  await execFileAsync(browserPath, [
+    "--new-window",
+    "--disable-features=msEdgeSidebarV2",
+    fileUrl,
   ]);
 }
 
@@ -423,14 +442,7 @@ async function printHtmlBase64(printerName, htmlBase64) {
       throw new Error("Aucun navigateur Chromium (Edge/Chrome) trouvé pour rendu HTML.");
     }
     if (PRINT_DELIVERY_MODE === "pdf_preview") {
-      const url = pathToFileURL(tmpHtml).toString();
-      await execFileAsync(browserPath, [
-        "--headless",
-        "--disable-gpu",
-        `--print-to-pdf=${tmpPdf}`,
-        url,
-      ]);
-      await previewPdfFile(tmpPdf);
+      await previewHtmlPrintDialog(browserPath, tmpHtml);
       return;
     }
     try {
@@ -447,7 +459,9 @@ async function printHtmlBase64(printerName, htmlBase64) {
     }
   } finally {
     await fs.unlink(tmpHtml).catch(() => undefined);
-    await fs.unlink(tmpPdf).catch(() => undefined);
+    if (PRINT_DELIVERY_MODE !== "pdf_preview") {
+      await fs.unlink(tmpPdf).catch(() => undefined);
+    }
   }
 }
 
@@ -542,7 +556,19 @@ async function processJobs(token) {
   const pulled = await cloudFetch("/pos/agent/jobs/pull?limit=20", {
     headers: { Authorization: `Bearer ${token}` },
   });
-  const jobs = Array.isArray(pulled?.jobs) ? pulled.jobs : [];
+  const jobsRaw = Array.isArray(pulled?.jobs) ? pulled.jobs : [];
+  const jobs = PRINT_DELIVERY_MODE === "pdf_preview"
+    ? [...jobsRaw].sort((a, b) => {
+        const ta = String(a?.payload?.type || "");
+        const tb = String(b?.payload?.type || "");
+        const wa = ta === "HTML_PRINT" ? 0 : ta === "PDF_PRINT" ? 1 : 2;
+        const wb = tb === "HTML_PRINT" ? 0 : tb === "PDF_PRINT" ? 1 : 2;
+        if (wa !== wb) return wa - wb;
+        const da = Number(new Date(String(a?.createdAt || 0)).getTime() || 0);
+        const db = Number(new Date(String(b?.createdAt || 0)).getTime() || 0);
+        return da - db;
+      })
+    : jobsRaw;
   for (const j of jobs) {
     let ok = true;
     let error = null;
